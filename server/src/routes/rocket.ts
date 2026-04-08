@@ -101,7 +101,7 @@ router.post('/bet', authMiddleware, async (req: Request, res: Response): Promise
   const registered = placeBet(telegram_id, entryData.id as string, bet)
   if (!registered.ok) {
     // Round ended or user already has an active bet — delete DB entry and refund
-    await supabase.from('rocket_entries').delete().eq('id', entryData.id).catch(() => {})
+    await supabase.from('rocket_entries').delete().eq('id', entryData.id)
     await creditBalance(telegram_id, bet, 'refund', 'rocket').catch(() => {})
     const error =
       registered.reason === 'duplicate'
