@@ -20,7 +20,7 @@ export function DevTab() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center gap-4 p-4 pt-12">
+    <div className="flex flex-col items-center justify-center gap-4 p-4 h-full overflow-hidden">
       <p className="text-neutral-500 text-sm">Developer Tools</p>
       <button
         onClick={handleAddCoins}

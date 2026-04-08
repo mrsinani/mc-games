@@ -183,7 +183,7 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
     if (!container) return
 
     const width = container.offsetWidth || 360
-    const height = 420
+    const height = container.offsetHeight || 300
 
     const config: Phaser.Types.Core.GameConfig = {
       type: Phaser.AUTO,
@@ -248,7 +248,7 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
   }
 
   return (
-    <div className="min-h-dvh bg-black flex flex-col">
+    <div className="h-dvh bg-black flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800 shrink-0">
         <button
@@ -260,70 +260,63 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
         <h1 className="text-white font-bold text-lg">Plinko</h1>
       </div>
 
-      {/* Phaser canvas container */}
-      <div ref={containerRef} className="w-full shrink-0" style={{ height: 420 }} />
+      {/* Phaser canvas container — fills remaining space */}
+      <div ref={containerRef} className="w-full flex-1 min-h-0" />
 
       {/* Controls */}
-      <div className="flex-1 flex flex-col gap-4 p-4 border-t border-neutral-800">
-        {/* Bet input */}
-        <div className="flex flex-col gap-1">
-          <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
-            Bet Amount
-          </label>
-          <input
-            type="number"
-            value={bet}
-            onChange={(e) => {
-              setBetError(null)
-              setBet(Math.max(minBet, parseInt(e.target.value) || 0))
-            }}
-            disabled={isPlaying}
-            className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50"
-            min={minBet}
-            max={maxBet}
-          />
-          {betError && (
-            <p className="text-red-400 text-xs mt-1">{betError}</p>
-          )}
-        </div>
-
-        {/* Quick bet buttons */}
-        <div className="flex gap-2">
+      <div className="shrink-0 flex flex-col gap-3 p-4 border-t border-neutral-800">
+        {/* Bet input + quick bets row */}
+        <div className="flex gap-2 items-end">
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
+              Bet
+            </label>
+            <input
+              type="number"
+              value={bet}
+              onChange={(e) => {
+                setBetError(null)
+                setBet(Math.max(minBet, parseInt(e.target.value) || 0))
+              }}
+              disabled={isPlaying}
+              className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50"
+              min={minBet}
+              max={maxBet}
+            />
+          </div>
           {[10, 50, 100, 500].map((amount) => (
             <button
               key={amount}
               onClick={() => setBet(amount)}
               disabled={isPlaying}
-              className="flex-1 bg-neutral-900 border border-neutral-700 text-white text-sm font-medium rounded-lg py-2 hover:border-neutral-600 disabled:opacity-50"
+              className="bg-neutral-900 border border-neutral-700 text-white text-xs font-medium rounded-lg px-2 py-2 hover:border-neutral-600 disabled:opacity-50"
             >
               {amount}
             </button>
           ))}
         </div>
+        {betError && <p className="text-red-400 text-xs">{betError}</p>}
 
-        {/* Drop button */}
-        <button
-          onClick={handleDrop}
-          disabled={isPlaying}
-          className="w-full bg-white text-black font-bold rounded-lg py-3 text-base hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isPlaying ? 'Dropping…' : 'Drop'}
-        </button>
+        {/* Drop button + result */}
+        <div className="flex gap-3 items-center">
+          <button
+            onClick={handleDrop}
+            disabled={isPlaying}
+            className="flex-1 bg-white text-black font-bold rounded-lg py-3 text-base hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isPlaying ? 'Dropping…' : 'Drop'}
+          </button>
+          {result && (
+            <div className="text-center shrink-0">
+              <p className="text-white font-bold text-xl">{result.multiplier}x</p>
+              <p className="text-neutral-400 text-xs">
+                {result.payout > 0 ? `+${result.payout}` : 'No win'}
+              </p>
+            </div>
+          )}
+        </div>
 
-        {/* Result */}
-        {result && (
-          <div className="text-center py-2">
-            <p className="text-white font-bold text-2xl">{result.multiplier}x</p>
-            <p className="text-neutral-400 text-sm mt-1">
-              {result.payout > 0 ? `+${result.payout} coins` : 'No win'}
-            </p>
-          </div>
-        )}
-
-        {/* Error */}
-        {apiError && (
-          <p className="text-red-400 text-sm text-center">{apiError}</p>
-        )}
+        {apiError && <p className="text-red-400 text-sm text-center">{apiError}</p>}
       </div>
     </div>
   )

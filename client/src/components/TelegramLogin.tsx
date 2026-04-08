@@ -44,7 +44,7 @@ export function TelegramLogin({ onLogin }: TelegramLoginProps) {
   }, [onLogin])
 
   return (
-    <div className="min-h-dvh bg-black flex flex-col items-center justify-center px-6">
+    <div className="h-dvh bg-black flex flex-col items-center justify-center px-6 overflow-hidden">
       <h1 className="text-white text-3xl font-bold mb-2">Casino</h1>
       <p className="text-neutral-400 text-sm mb-8">Sign in with your Telegram account to play</p>
       {isLoading ? (

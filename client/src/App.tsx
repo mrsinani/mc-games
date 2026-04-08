@@ -16,7 +16,7 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="min-h-dvh bg-black flex items-center justify-center">
+      <div className="h-dvh bg-black flex items-center justify-center">
         <p className="text-white text-lg">Loading...</p>
       </div>
     )
@@ -28,7 +28,7 @@ function AppContent() {
 
   if (error) {
     return (
-      <div className="min-h-dvh bg-black flex items-center justify-center px-6">
+      <div className="h-dvh bg-black flex items-center justify-center px-6">
         <p className="text-neutral-400 text-center">{error}</p>
       </div>
     )
@@ -43,9 +43,9 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-dvh bg-black flex flex-col">
+    <div className="h-dvh bg-black flex flex-col overflow-hidden">
       <Header />
-      <main className="flex-1 overflow-y-auto pt-14 pb-20">
+      <main className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'games' && <GamesTab onGameSelect={setActiveGame} />}
         {activeTab === 'profile' && <ProfileTab />}
         {activeTab === 'dev' && <DevTab />}

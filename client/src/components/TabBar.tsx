@@ -13,7 +13,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 export function TabBar({ active, onChange }: TabBarProps) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-10 flex bg-black border-t border-neutral-800 pb-6">
+    <nav className="shrink-0 flex bg-black border-t border-neutral-800 pb-[env(safe-area-inset-bottom)]">
       {TABS.map((tab) => (
         <button
           key={tab.id}

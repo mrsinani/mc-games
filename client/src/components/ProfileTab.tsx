@@ -4,7 +4,7 @@ export function ProfileTab() {
   const { user } = useApp()
 
   return (
-    <div className="flex flex-col gap-6 p-4">
+    <div className="flex flex-col gap-6 p-4 h-full overflow-hidden">
       <div className="flex flex-col gap-1">
         <p className="text-neutral-400 text-sm">Username</p>
         <p className="text-white font-semibold text-lg">

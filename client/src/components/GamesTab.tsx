@@ -48,7 +48,7 @@ export function GamesTab({ onGameSelect }: GamesTabProps) {
   const pvpEnabled = Boolean(config?.pvp_enabled)
 
   return (
-    <div className="flex flex-col gap-3 p-4">
+    <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
       <GameCard
         icon="🔮"
         title="Plinko"
