@@ -1,0 +1,291 @@
+import { createHmac, createHash, randomBytes, randomUUID } from 'crypto'
+import type { Server, Socket } from 'socket.io'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+function generateCrashPoint(serverSeed: string, nonce: number, rtp: number): number {
+  const clientSeed = 'mvp1'
+  const hash = createHmac('sha256', serverSeed).update(`${clientSeed}:${nonce}`).digest('hex')
+  const n = parseInt(hash.slice(0, 13), 16)
+  const MAX = Math.pow(2, 52)
+  const raw = ((100 * MAX) - n) / (MAX - n)
+  const crashPoint = Math.max(1.00, Math.floor(raw * rtp * 100) / 100)
+  return crashPoint
+}
+
+export type RocketPhase = 'betting' | 'flight' | 'crash' | 'cooldown'
+
+interface ActiveBet {
+  entryId: string
+  bet: number
+  cashedOut: boolean
+  cashoutPending: boolean
+  cashoutAt: number | null
+}
+
+export interface RoundState {
+  phase: RocketPhase
+  roundId: string
+  multiplier: number
+  serverSeedHash: string
+}
+
+// In-memory state
+const activeBets = new Map<number, ActiveBet>()
+const userSockets = new Map<number, string>() // telegram_id -> socket.id
+
+let currentPhase: RocketPhase = 'cooldown'
+let currentRoundId = ''
+let currentMultiplier = 1.00
+let currentServerSeed = ''
+let currentServerSeedHash = ''
+let previousServerSeed: string | null = null
+let nonce = 0
+let rtp = 0.93
+let roundCount = 0
+let tickInterval: ReturnType<typeof setInterval> | null = null
+let roundStartTime = 0
+let didRotateThisRound = false
+
+let ioRef: Server | null = null
+let supabaseRef: SupabaseClient | null = null
+
+export function getRoundState(): RoundState {
+  return {
+    phase: currentPhase,
+    roundId: currentRoundId,
+    multiplier: currentMultiplier,
+    serverSeedHash: currentServerSeedHash,
+  }
+}
+
+export function placeBet(
+  telegramId: number,
+  entryId: string,
+  bet: number
+): { ok: boolean; reason?: 'phase' | 'duplicate' } {
+  if (currentPhase !== 'betting') return { ok: false, reason: 'phase' }
+  if (activeBets.has(telegramId)) return { ok: false, reason: 'duplicate' }
+  activeBets.set(telegramId, { entryId, bet, cashedOut: false, cashoutPending: false, cashoutAt: null })
+  return { ok: true }
+}
+
+export function prepareCashout(
+  telegramId: number
+): { multiplier: number; payout: number; entryId: string } | null {
+  if (currentPhase !== 'flight') return null
+  const betData = activeBets.get(telegramId)
+  if (!betData || betData.cashedOut || betData.cashoutPending) return null
+
+  const mult = currentMultiplier
+  const payout = Math.floor(betData.bet * mult)
+
+  // Mark pending to prevent concurrent cashouts before DB confirms
+  betData.cashoutPending = true
+  activeBets.set(telegramId, betData)
+
+  return { multiplier: mult, payout, entryId: betData.entryId }
+}
+
+export function confirmCashout(telegramId: number, mult: number): void {
+  const betData = activeBets.get(telegramId)
+  if (betData) {
+    betData.cashedOut = true
+    betData.cashoutPending = false
+    betData.cashoutAt = mult
+    activeBets.set(telegramId, betData)
+  }
+}
+
+export function rollbackCashout(telegramId: number): void {
+  const betData = activeBets.get(telegramId)
+  if (betData && betData.cashoutPending && !betData.cashedOut) {
+    betData.cashoutPending = false
+    activeBets.set(telegramId, betData)
+  }
+}
+
+export function getCurrentRoundId(): string {
+  return currentRoundId
+}
+
+export function emitToUser(telegramId: number, event: string, data: unknown): void {
+  if (!ioRef) return
+  const socketId = userSockets.get(telegramId)
+  if (socketId) {
+    ioRef.to(socketId).emit(event, data)
+  }
+}
+
+function rotateSeed(): void {
+  previousServerSeed = currentServerSeed
+  currentServerSeed = randomBytes(32).toString('hex')
+  currentServerSeedHash = createHash('sha256').update(currentServerSeed).digest('hex')
+  didRotateThisRound = true
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function runRound(): Promise<void> {
+  if (!ioRef || !supabaseRef) return
+
+  // Setup round
+  currentPhase = 'betting'
+  activeBets.clear()
+  currentRoundId = randomUUID()
+  currentMultiplier = 1.00
+  nonce++
+  didRotateThisRound = false
+  roundCount++
+
+  // Rotate seed every 100 rounds
+  if (roundCount % 100 === 1 && roundCount > 1) {
+    rotateSeed()
+  }
+
+  const crashPoint = generateCrashPoint(currentServerSeed, nonce, rtp)
+
+  // Persist round row at betting open so entries can reference it via FK
+  try {
+    await supabaseRef.from('rocket_rounds').insert({
+      id: currentRoundId,
+      seed: currentServerSeedHash,
+      started_at: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('Failed to persist rocket round start:', err)
+  }
+
+  // Emit round:open
+  ioRef.emit('round:open', {
+    roundId: currentRoundId,
+    serverSeedHash: currentServerSeedHash,
+    previousServerSeed: didRotateThisRound ? previousServerSeed : null,
+  })
+
+  // Betting phase: 5 seconds
+  await sleep(5000)
+
+  // Launch phase
+  currentPhase = 'flight'
+  roundStartTime = Date.now()
+  ioRef.emit('round:launch', { roundId: currentRoundId })
+
+  // Flight phase with 100ms ticks
+  await new Promise<void>((resolve) => {
+    tickInterval = setInterval(() => {
+      if (!ioRef) return
+      const elapsed = Date.now() - roundStartTime
+      currentMultiplier = Math.floor(Math.pow(Math.E, 0.00006 * elapsed) * 100) / 100
+
+      ioRef.emit('multiplier:tick', { multiplier: currentMultiplier, roundId: currentRoundId })
+
+      if (currentMultiplier >= crashPoint) {
+        if (tickInterval) {
+          clearInterval(tickInterval)
+          tickInterval = null
+        }
+        resolve()
+      }
+    }, 100)
+  })
+
+  // Crash phase
+  currentPhase = 'crash'
+  currentMultiplier = crashPoint
+
+  ioRef.emit('round:crash', {
+    crashPoint,
+    roundId: currentRoundId,
+    revealedSeed: didRotateThisRound ? previousServerSeed : null,
+  })
+
+  // Cooldown: update round row and settle losing entries
+  currentPhase = 'cooldown'
+
+  try {
+    await supabaseRef
+      .from('rocket_rounds')
+      .update({
+        crash_at: crashPoint,
+        crashed_at: new Date().toISOString(),
+      })
+      .eq('id', currentRoundId)
+
+    // Single update to settle all losing entries for this round
+    await supabaseRef
+      .from('rocket_entries')
+      .update({ payout: 0 })
+      .eq('round_id', currentRoundId)
+      .is('cashout_at', null)
+  } catch (err) {
+    console.error('Failed to persist rocket round crash:', err)
+  }
+
+  await sleep(3000)
+}
+
+function registerSocketHandlers(socket: Socket): void {
+  socket.on('register', (data: { telegramId: number }) => {
+    if (typeof data?.telegramId === 'number') {
+      userSockets.set(data.telegramId, socket.id)
+    }
+  })
+
+  socket.on('disconnect', () => {
+    for (const [telegramId, socketId] of userSockets.entries()) {
+      if (socketId === socket.id) {
+        userSockets.delete(telegramId)
+        break
+      }
+    }
+  })
+
+  // Send current state to newly connected client
+  socket.emit('round:state', getRoundState())
+}
+
+export async function startRocketEngine(io: Server, supabase: SupabaseClient): Promise<void> {
+  ioRef = io
+  supabaseRef = supabase
+
+  // Initialize first seed
+  currentServerSeed = randomBytes(32).toString('hex')
+  currentServerSeedHash = createHash('sha256').update(currentServerSeed).digest('hex')
+
+  // Register socket connection handlers
+  io.on('connection', registerSocketHandlers)
+
+  // Fetch RTP from DB
+  try {
+    const { data } = await supabase
+      .from('game_config')
+      .select('value')
+      .eq('key', 'rocket_rtp')
+      .single()
+    if (data?.value) {
+      rtp = parseFloat(data.value as string)
+    }
+  } catch {
+    console.log('Using default rocket RTP:', rtp)
+  }
+
+  // Continuous round loop
+  void runLoop()
+}
+
+async function runLoop(): Promise<void> {
+  while (true) {
+    try {
+      await runRound()
+    } catch (err) {
+      console.error('Rocket engine error:', err)
+      if (tickInterval) {
+        clearInterval(tickInterval)
+        tickInterval = null
+      }
+      await sleep(3000)
+    }
+  }
+}

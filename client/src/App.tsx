@@ -7,6 +7,7 @@ import { ProfileTab } from './components/ProfileTab'
 import { DevTab } from './components/DevTab'
 import { TelegramLogin } from './components/TelegramLogin'
 import { PlinkoGame } from './components/PlinkoGame'
+import { RocketGame } from './components/RocketGame'
 
 function AppContent() {
   const { loading, error, needsLogin, loginWithWidgetData } = useApp()
@@ -35,6 +36,10 @@ function AppContent() {
 
   if (activeGame === 'plinko') {
     return <PlinkoGame onBack={() => setActiveGame(null)} />
+  }
+
+  if (activeGame === 'rocket') {
+    return <RocketGame onBack={() => setActiveGame(null)} />
   }
 
   return (

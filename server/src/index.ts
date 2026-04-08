@@ -8,6 +8,9 @@ import configRoutes from './routes/config'
 import userRoutes from './routes/user'
 import devRoutes from './routes/dev'
 import plinkoRoutes from './routes/plinko'
+import rocketRoutes from './routes/rocket'
+import { startRocketEngine } from './game/rocketEngine'
+import { supabase } from './lib/supabase'
 
 const app = express()
 const httpServer = createServer(app)
@@ -35,6 +38,7 @@ app.use('/', configRoutes)
 app.use('/', userRoutes)
 app.use('/dev', devRoutes)
 app.use('/plinko', plinkoRoutes)
+app.use('/rocket', rocketRoutes)
 
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`)
@@ -42,6 +46,8 @@ io.on('connection', (socket) => {
     console.log(`Client disconnected: ${socket.id}`)
   })
 })
+
+startRocketEngine(io, supabase)
 
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)

@@ -21,11 +21,19 @@ This is a manual step — you need to do this yourself via Telegram.
 
 ## Database Setup
 
-Run the migration and seed files against your Supabase project:
+Run the migration and seed files against your Supabase project in order:
 
 1. Go to your [Supabase dashboard](https://supabase.com/dashboard)
 2. Select your project → **SQL Editor**
-3. Copy the contents of `supabase/migrations/001_initial_schema.sql` and run it
+3. Run each migration file in order:
+   - `supabase/migrations/001_initial_schema.sql`
+   - `supabase/migrations/002_balance_functions.sql`
+   - `supabase/migrations/003_sessions.sql`
+   - `supabase/migrations/004_balance_game_param.sql`
+   - `supabase/migrations/005_play_plinko.sql`
+   - `supabase/migrations/006_plinko_config_seed.sql`
+   - `supabase/migrations/007_rocket_config.sql`
+   - `supabase/migrations/008_rocket_round_columns.sql`
 4. Copy the contents of `supabase/seed.sql` and run it
 
 ## Configure Environment Variables
@@ -121,7 +129,14 @@ mc-games/
 │   └── .env.example
 ├── supabase/         # SQL migrations and seed data
 │   ├── migrations/
-│   │   └── 001_initial_schema.sql
+│   │   ├── 001_initial_schema.sql
+│   │   ├── 002_balance_functions.sql
+│   │   ├── 003_sessions.sql
+│   │   ├── 004_balance_game_param.sql
+│   │   ├── 005_play_plinko.sql
+│   │   ├── 006_plinko_config_seed.sql
+│   │   ├── 007_rocket_config.sql
+│   │   └── 008_rocket_round_columns.sql
 │   └── seed.sql
 └── prd-mvp1.md       # Product requirements document
 ```

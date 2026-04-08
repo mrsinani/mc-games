@@ -119,6 +119,29 @@ export function playPlinko(bet: number): Promise<PlinkoResponse> {
   })
 }
 
+export interface RocketBetResponse {
+  success: boolean
+  balance: number
+}
+
+export interface RocketCashoutResponse {
+  success: boolean
+  cashoutAt: number
+  payout: number
+  newBalance: number
+}
+
+export function rocketPlaceBet(bet: number): Promise<RocketBetResponse> {
+  return apiRequest<RocketBetResponse>('/rocket/bet', {
+    method: 'POST',
+    body: JSON.stringify({ bet }),
+  })
+}
+
+export function rocketCashout(): Promise<RocketCashoutResponse> {
+  return apiRequest<RocketCashoutResponse>('/rocket/cashout', { method: 'POST' })
+}
+
 export async function loginWithWidget(data: TelegramWidgetData): Promise<WidgetLoginResponse> {
   const res = await fetch(`${API_URL}/auth/telegram-widget`, {
     method: 'POST',

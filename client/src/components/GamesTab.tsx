@@ -61,6 +61,7 @@ export function GamesTab({ onGameSelect }: GamesTabProps) {
         title="Rocket"
         subtitle="Cash out before crash"
         enabled={rocketEnabled}
+        onClick={() => onGameSelect('rocket')}
       />
       <GameCard
         icon="🎡"
