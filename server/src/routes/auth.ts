@@ -100,4 +100,38 @@ router.post('/telegram-widget', async (req: Request, res: Response): Promise<voi
   res.json({ user: userData, balance: userData.balance, token })
 })
 
+if (process.env['NODE_ENV'] !== 'production') {
+  router.post('/dev-login', async (req: Request, res: Response): Promise<void> => {
+    const telegram_id = 999999999
+    const username = 'dev_user'
+    const first_name = 'Dev'
+
+    const { data: userData, error: upsertError } = await supabase
+      .from('users')
+      .upsert(
+        { telegram_id, username, first_name, last_seen_at: new Date().toISOString() },
+        { onConflict: 'telegram_id' }
+      )
+      .select('telegram_id, username, first_name, balance')
+      .single()
+
+    if (upsertError || !userData) {
+      res.status(500).json({ error: 'Failed to upsert dev user' })
+      return
+    }
+
+    const token = randomUUID()
+    const { error: sessionError } = await supabase
+      .from('sessions')
+      .insert({ user_id: telegram_id, token })
+
+    if (sessionError) {
+      res.status(500).json({ error: 'Failed to create session' })
+      return
+    }
+
+    res.json({ user: userData, balance: userData.balance, token })
+  })
+}
+
 export default router

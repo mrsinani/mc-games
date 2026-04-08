@@ -7,11 +7,14 @@ declare global {
   }
 }
 
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+
 interface TelegramLoginProps {
   onLogin: (data: TelegramWidgetData) => Promise<void>
+  onDevLogin?: () => Promise<void>
 }
 
-export function TelegramLogin({ onLogin }: TelegramLoginProps) {
+export function TelegramLogin({ onLogin, onDevLogin }: TelegramLoginProps) {
   const widgetRef = useRef<HTMLDivElement>(null)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -43,6 +46,16 @@ export function TelegramLogin({ onLogin }: TelegramLoginProps) {
     }
   }, [onLogin])
 
+  async function handleDevLogin() {
+    if (!onDevLogin) return
+    setIsLoading(true)
+    try {
+      await onDevLogin()
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
     <div className="h-dvh bg-black flex flex-col items-center justify-center px-6 overflow-hidden">
       <h1 className="text-white text-3xl font-bold mb-2">Casino</h1>
@@ -50,7 +63,17 @@ export function TelegramLogin({ onLogin }: TelegramLoginProps) {
       {isLoading ? (
         <p className="text-neutral-400 text-sm">Signing in...</p>
       ) : (
-        <div ref={widgetRef} />
+        <>
+          <div ref={widgetRef} />
+          {isLocalhost && onDevLogin && (
+            <button
+              onClick={handleDevLogin}
+              className="mt-6 px-6 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-lg transition-colors"
+            >
+              Dev Login (localhost only)
+            </button>
+          )}
+        </>
       )}
     </div>
   )

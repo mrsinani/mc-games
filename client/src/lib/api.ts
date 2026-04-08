@@ -142,6 +142,18 @@ export function rocketCashout(): Promise<RocketCashoutResponse> {
   return apiRequest<RocketCashoutResponse>('/rocket/cashout', { method: 'POST' })
 }
 
+export async function devLogin(): Promise<WidgetLoginResponse> {
+  const res = await fetch(`${API_URL}/auth/dev-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    const message = await parseErrorResponse(res)
+    throw new Error(message)
+  }
+  return res.json() as Promise<WidgetLoginResponse>
+}
+
 export async function loginWithWidget(data: TelegramWidgetData): Promise<WidgetLoginResponse> {
   const res = await fetch(`${API_URL}/auth/telegram-widget`, {
     method: 'POST',

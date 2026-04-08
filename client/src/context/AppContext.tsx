@@ -11,6 +11,7 @@ import {
   getMe,
   getConfig,
   loginWithWidget,
+  devLogin,
   setSessionToken,
   getSessionToken,
   clearSessionToken,
@@ -32,6 +33,7 @@ interface AppContextValue {
   needsLogin: boolean
   setBalance: (newBalance: number) => void
   loginWithWidgetData: (data: TelegramWidgetData) => Promise<void>
+  loginAsDev: () => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -98,8 +100,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setNeedsLogin(false)
   }
 
+  async function loginAsDev(): Promise<void> {
+    const response = await devLogin()
+    setSessionToken(response.token)
+    const configRes = await getConfig()
+    setUser(response.user)
+    setConfig(configRes)
+    setNeedsLogin(false)
+  }
+
   return (
-    <AppContext.Provider value={{ user, config, loading, error, needsLogin, setBalance, loginWithWidgetData }}>
+    <AppContext.Provider value={{ user, config, loading, error, needsLogin, setBalance, loginWithWidgetData, loginAsDev }}>
       {children}
     </AppContext.Provider>
   )

@@ -17,8 +17,12 @@ const httpServer = createServer(app)
 
 const PORT = process.env['PORT'] ?? 3001
 const CLIENT_ORIGIN = process.env['CLIENT_ORIGIN'] ?? 'http://localhost:5173'
+const allowedOrigins = [CLIENT_ORIGIN]
+if (process.env['NODE_ENV'] !== 'production') {
+  allowedOrigins.push('http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173')
+}
 
-app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }))
+app.use(cors({ origin: allowedOrigins, credentials: true }))
 app.use(express.json())
 
 export const io = new Server(httpServer, {

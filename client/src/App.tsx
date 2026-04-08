@@ -10,7 +10,7 @@ import { PlinkoGame } from './components/PlinkoGame'
 import { RocketGame } from './components/RocketGame'
 
 function AppContent() {
-  const { loading, error, needsLogin, loginWithWidgetData } = useApp()
+  const { loading, error, needsLogin, loginWithWidgetData, loginAsDev } = useApp()
   const [activeTab, setActiveTab] = useState<Tab>('games')
   const [activeGame, setActiveGame] = useState<string | null>(null)
 
@@ -23,7 +23,7 @@ function AppContent() {
   }
 
   if (needsLogin) {
-    return <TelegramLogin onLogin={loginWithWidgetData} />
+    return <TelegramLogin onLogin={loginWithWidgetData} onDevLogin={loginAsDev} />
   }
 
   if (error) {
