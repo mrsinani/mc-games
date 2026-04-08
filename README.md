@@ -15,9 +15,9 @@ This is a manual step — you need to do this yourself via Telegram.
 
 1. Open Telegram and search for **@BotFather**
 2. Send `/newbot` and follow the prompts to name your bot
-3. BotFather will give you a **bot token** — save it (you'll need it for `server/.env`)
-4. Send `/setwebapp` to BotFather, select your bot, and set the Mini App URL to your deployed frontend URL (use the ngrok HTTPS URL for local development)
-5. Send `/setmenubutton` to BotFather, select your bot, and configure the chat menu button to open your Mini App
+3. BotFather will give you a **bot token** — save it (you'll need it for the Railway environment variables)
+4. Send `/setwebapp` to BotFather, select your bot, and set the Mini App URL to `https://mc-games-client.vercel.app`
+5. Send `/setmenubutton` to BotFather, select your bot, and configure the chat menu button to open `https://mc-games-client.vercel.app`
 
 ## Database Setup
 
@@ -30,6 +30,13 @@ Run the migration and seed files against your Supabase project:
 
 ## Configure Environment Variables
 
+For production, environment variables are set directly on the hosting dashboards — no `.env` files needed:
+
+- **Client (Vercel):** Project → Settings → Environment Variables
+- **Server (Railway):** Project → Service → Variables
+
+The `.env.example` files below are only needed for local development.
+
 ### Client (`client/.env`)
 
 ```
@@ -40,7 +47,7 @@ Fill in:
 
 | Variable | Value |
 |---|---|
-| `VITE_API_URL` | Your backend URL (default: `http://localhost:3001`) |
+| `VITE_API_URL` | Your backend URL (default: `https://server-production-ec57.up.railway.app`) |
 | `VITE_SUPABASE_URL` | From Supabase dashboard → Project Settings → API |
 | `VITE_SUPABASE_ANON_KEY` | From Supabase dashboard → Project Settings → API |
 
@@ -56,6 +63,7 @@ Fill in:
 |---|---|
 | `PORT` | Port to run the server on (default: `3001`) |
 | `BOT_TOKEN` | Telegram bot token from BotFather |
+| `CLIENT_ORIGIN` | Allowed CORS origin (default: `https://mc-games-client.vercel.app`) |
 | `SUPABASE_URL` | From Supabase dashboard → Project Settings → API |
 | `SUPABASE_SERVICE_ROLE_KEY` | From Supabase dashboard → Project Settings → API (service_role key) |
 
@@ -82,12 +90,19 @@ npm run dev:server   # Express on http://localhost:3001
 
 ### Health Check
 
-Once the server is running:
-
 ```bash
-curl http://localhost:3001/health
+curl https://server-production-ec57.up.railway.app/health
 # {"status":"ok"}
 ```
+
+## Deployment
+
+Pushing to the `main` branch auto-deploys both services:
+
+- **Client → Vercel** — triggers on every push; live at `https://mc-games-client.vercel.app`
+- **Server → Railway** — triggers on every push; live at `https://server-production-ec57.up.railway.app`
+
+No manual deploy steps needed after the initial setup.
 
 ## Project Structure
 
@@ -124,4 +139,3 @@ mc-games/
 | Database | Supabase (PostgreSQL) |
 | Frontend hosting | Vercel |
 | Backend hosting | Railway |
-| Local tunneling | ngrok |
