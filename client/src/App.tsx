@@ -6,10 +6,12 @@ import { GamesTab } from './components/GamesTab'
 import { ProfileTab } from './components/ProfileTab'
 import { DevTab } from './components/DevTab'
 import { TelegramLogin } from './components/TelegramLogin'
+import { PlinkoGame } from './components/PlinkoGame'
 
 function AppContent() {
   const { loading, error, needsLogin, loginWithWidgetData } = useApp()
   const [activeTab, setActiveTab] = useState<Tab>('games')
+  const [activeGame, setActiveGame] = useState<string | null>(null)
 
   if (loading) {
     return (
@@ -31,11 +33,15 @@ function AppContent() {
     )
   }
 
+  if (activeGame === 'plinko') {
+    return <PlinkoGame onBack={() => setActiveGame(null)} />
+  }
+
   return (
     <div className="min-h-dvh bg-black flex flex-col">
       <Header />
       <main className="flex-1 overflow-y-auto pt-14 pb-20">
-        {activeTab === 'games' && <GamesTab />}
+        {activeTab === 'games' && <GamesTab onGameSelect={setActiveGame} />}
         {activeTab === 'profile' && <ProfileTab />}
         {activeTab === 'dev' && <DevTab />}
       </main>

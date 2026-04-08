@@ -5,11 +5,13 @@ interface GameCardProps {
   title: string
   subtitle: string
   enabled: boolean
+  onClick?: () => void
 }
 
-function GameCard({ icon, title, subtitle, enabled }: GameCardProps) {
+function GameCard({ icon, title, subtitle, enabled, onClick }: GameCardProps) {
   return (
     <div
+      onClick={enabled ? onClick : undefined}
       className={`flex items-center gap-4 bg-neutral-900 border border-neutral-800 rounded-xl p-5 ${
         enabled
           ? 'cursor-pointer hover:border-neutral-700'
@@ -34,7 +36,11 @@ function GameCard({ icon, title, subtitle, enabled }: GameCardProps) {
   )
 }
 
-export function GamesTab() {
+interface GamesTabProps {
+  onGameSelect: (game: string) => void
+}
+
+export function GamesTab({ onGameSelect }: GamesTabProps) {
   const { config } = useApp()
 
   const plinkoEnabled = Boolean(config?.plinko_enabled)
@@ -48,6 +54,7 @@ export function GamesTab() {
         title="Plinko"
         subtitle="Drop & win up to 10x"
         enabled={plinkoEnabled}
+        onClick={() => onGameSelect('plinko')}
       />
       <GameCard
         icon="🚀"

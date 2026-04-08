@@ -16,6 +16,17 @@ export function clearSessionToken(): void {
   localStorage.removeItem(SESSION_TOKEN_KEY)
 }
 
+async function parseErrorResponse(res: Response): Promise<string> {
+  try {
+    const body = await res.json()
+    if (typeof body.error === 'string' && body.error) return body.error
+    if (typeof body.message === 'string' && body.message) return body.message
+  } catch {
+    // response body is not JSON
+  }
+  return res.statusText || `HTTP ${res.status}`
+}
+
 export async function apiRequest<T = unknown>(
   path: string,
   options: RequestInit = {},
@@ -37,7 +48,10 @@ export async function apiRequest<T = unknown>(
     ...options,
     headers: { ...headers, ...options.headers },
   })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) {
+    const message = await parseErrorResponse(res)
+    throw new Error(message)
+  }
   return res.json() as Promise<T>
 }
 
@@ -91,12 +105,29 @@ export function addCoins(): Promise<AddCoinsResponse> {
   return apiRequest<AddCoinsResponse>('/dev/add-coins', { method: 'POST' })
 }
 
+export interface PlinkoResponse {
+  outcomeIndex: number
+  multiplier: number
+  payout: number
+  newBalance: number
+}
+
+export function playPlinko(bet: number): Promise<PlinkoResponse> {
+  return apiRequest<PlinkoResponse>('/plinko/play', {
+    method: 'POST',
+    body: JSON.stringify({ bet }),
+  })
+}
+
 export async function loginWithWidget(data: TelegramWidgetData): Promise<WidgetLoginResponse> {
   const res = await fetch(`${API_URL}/auth/telegram-widget`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) {
+    const message = await parseErrorResponse(res)
+    throw new Error(message)
+  }
   return res.json() as Promise<WidgetLoginResponse>
 }

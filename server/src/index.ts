@@ -7,6 +7,7 @@ import authRoutes from './routes/auth'
 import configRoutes from './routes/config'
 import userRoutes from './routes/user'
 import devRoutes from './routes/dev'
+import plinkoRoutes from './routes/plinko'
 
 const app = express()
 const httpServer = createServer(app)
@@ -33,6 +34,7 @@ app.use('/auth', authRoutes)
 app.use('/', configRoutes)
 app.use('/', userRoutes)
 app.use('/dev', devRoutes)
+app.use('/plinko', plinkoRoutes)
 
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`)
