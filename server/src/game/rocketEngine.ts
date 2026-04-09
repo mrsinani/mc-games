@@ -8,7 +8,7 @@ function generateCrashPoint(serverSeed: string, nonce: number, rtp: number): num
   const n = parseInt(hash.slice(0, 13), 16)
   const MAX = Math.pow(2, 52)
   const raw = ((100 * MAX) - n) / (MAX - n)
-  const crashPoint = Math.max(1.00, Math.floor(raw * rtp * 100) / 100)
+  const crashPoint = Math.max(1.00, Math.floor(raw * rtp) / 100)
   return crashPoint
 }
 
@@ -27,6 +27,7 @@ export interface RoundState {
   roundId: string
   multiplier: number
   serverSeedHash: string
+  elapsedMs: number
 }
 
 // In-memory state
@@ -55,6 +56,7 @@ export function getRoundState(): RoundState {
     roundId: currentRoundId,
     multiplier: currentMultiplier,
     serverSeedHash: currentServerSeedHash,
+    elapsedMs: currentPhase === 'flight' ? Date.now() - roundStartTime : 0,
   }
 }
 
@@ -157,15 +159,16 @@ async function runRound(): Promise<void> {
     console.error('Failed to persist rocket round start:', err)
   }
 
-  // Emit round:open
+  // Emit round:open with betting duration so clients can show a countdown
+  const BETTING_DURATION_MS = 5000
   ioRef.emit('round:open', {
     roundId: currentRoundId,
     serverSeedHash: currentServerSeedHash,
     previousServerSeed: didRotateThisRound ? previousServerSeed : null,
+    bettingDurationMs: BETTING_DURATION_MS,
   })
 
-  // Betting phase: 5 seconds
-  await sleep(5000)
+  await sleep(BETTING_DURATION_MS)
 
   // Launch phase
   currentPhase = 'flight'
@@ -179,7 +182,7 @@ async function runRound(): Promise<void> {
       const elapsed = Date.now() - roundStartTime
       currentMultiplier = Math.floor(Math.pow(Math.E, 0.00006 * elapsed) * 100) / 100
 
-      ioRef.emit('multiplier:tick', { multiplier: currentMultiplier, roundId: currentRoundId })
+      ioRef.emit('multiplier:tick', { multiplier: currentMultiplier, roundId: currentRoundId, elapsedMs: elapsed })
 
       if (currentMultiplier >= crashPoint) {
         if (tickInterval) {
@@ -195,10 +198,12 @@ async function runRound(): Promise<void> {
   currentPhase = 'crash'
   currentMultiplier = crashPoint
 
+  const COOLDOWN_DURATION_MS = 3000
   ioRef.emit('round:crash', {
     crashPoint,
     roundId: currentRoundId,
     revealedSeed: didRotateThisRound ? previousServerSeed : null,
+    cooldownDurationMs: COOLDOWN_DURATION_MS,
   })
 
   // Cooldown: update round row and settle losing entries
@@ -223,13 +228,22 @@ async function runRound(): Promise<void> {
     console.error('Failed to persist rocket round crash:', err)
   }
 
-  await sleep(3000)
+  await sleep(COOLDOWN_DURATION_MS)
 }
 
 function registerSocketHandlers(socket: Socket): void {
   socket.on('register', (data: { telegramId: number }) => {
     if (typeof data?.telegramId === 'number') {
       userSockets.set(data.telegramId, socket.id)
+
+      const betData = activeBets.get(data.telegramId)
+      if (betData) {
+        socket.emit('bet:restored', {
+          bet: betData.bet,
+          cashedOut: betData.cashedOut,
+          cashoutAt: betData.cashoutAt,
+        })
+      }
     }
   })
 

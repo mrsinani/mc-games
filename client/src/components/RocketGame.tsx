@@ -10,12 +10,10 @@ interface CurveChartProps {
   phase: GamePhase
   crashedAt: number | null
   cashedOutAt: number | null
-  elapsedTicks: number
+  elapsedMs: number
 }
 
-const TICK_MS = 100 // each multiplier tick ≈ 100ms
-
-function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedTicks }: CurveChartProps) {
+function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: CurveChartProps) {
   const historyRef = useRef<number[]>([1])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -26,13 +24,23 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedTicks }:
     if (phase === 'betting' || phase === 'cooldown') {
       historyRef.current = [1]
     } else if (phase === 'flight') {
-      historyRef.current.push(multiplier)
+      if (historyRef.current.length <= 1 && multiplier > 1.01 && elapsedMs > 200) {
+        // Mid-round join: reconstruct curve using the server's formula
+        const steps = Math.min(Math.round(elapsedMs / 100), 300)
+        const history: number[] = []
+        for (let i = 0; i <= steps; i++) {
+          const t = (elapsedMs / steps) * i
+          history.push(Math.floor(Math.pow(Math.E, 0.00006 * t) * 100) / 100)
+        }
+        historyRef.current = history
+      } else {
+        historyRef.current.push(multiplier)
+      }
     } else if (phase === 'crash' && crashedAt !== null) {
-      // only push once
       const last = historyRef.current[historyRef.current.length - 1]
       if (last !== crashedAt) historyRef.current.push(crashedAt)
     }
-  }, [multiplier, phase, crashedAt])
+  }, [multiplier, phase, crashedAt, elapsedMs])
 
   // Canvas draw loop
   useEffect(() => {
@@ -105,7 +113,7 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedTicks }:
       ctx!.fillText('1.0x', pad.l - 8, baseY + 4)
 
       // ── x-axis time labels ──
-      const totalSec = (elapsedTicks * TICK_MS) / 1000
+      const totalSec = elapsedMs / 1000
       const timeSteps = getTimeSteps(totalSec)
       ctx!.font = '11px ui-monospace, monospace'
       ctx!.textAlign = 'center'
@@ -237,7 +245,7 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedTicks }:
 
     rafRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [phase, multiplier, crashedAt, cashedOutAt, elapsedTicks])
+  }, [phase, multiplier, crashedAt, cashedOutAt, elapsedMs])
 
   return (
     <div ref={containerRef} className="w-full h-full relative rounded-2xl overflow-hidden">
@@ -284,17 +292,20 @@ interface RoundOpenPayload {
   roundId: string
   serverSeedHash: string
   previousServerSeed: string | null
+  bettingDurationMs?: number
 }
 
 interface MultiplierTickPayload {
   multiplier: number
   roundId?: string
+  elapsedMs?: number
 }
 
 interface RoundCrashPayload {
   crashPoint: number
   roundId: string
   revealedSeed: string | null
+  cooldownDurationMs?: number
 }
 
 interface CashoutConfirmedPayload {
@@ -308,6 +319,7 @@ interface RoundStatePayload {
   roundId: string
   multiplier: number
   serverSeedHash: string
+  elapsedMs?: number
 }
 
 export function RocketGame({ onBack }: RocketGameProps) {
@@ -329,16 +341,32 @@ export function RocketGame({ onBack }: RocketGameProps) {
   const [isPlacingBet, setIsPlacingBet] = useState(false)
   const [isCashingOut, setIsCashingOut] = useState(false)
   const [flashRed, setFlashRed] = useState(false)
-  const [elapsedTicks, setElapsedTicks] = useState(0)
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const hasActiveBetRef = useRef(false)
   const cashedOutRef = useRef(false)
   const currentRoundIdRef = useRef<string>('')
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Keep refs in sync
   hasActiveBetRef.current = hasActiveBet
   cashedOutRef.current = cashedOut
+
+  const startCountdown = useCallback((durationMs: number) => {
+    if (countdownRef.current) clearInterval(countdownRef.current)
+    const endsAt = Date.now() + durationMs
+    setCountdown(Math.ceil(durationMs / 1000))
+    countdownRef.current = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000))
+      setCountdown(remaining)
+      if (remaining <= 0 && countdownRef.current) {
+        clearInterval(countdownRef.current)
+        countdownRef.current = null
+      }
+    }, 200)
+  }, [])
 
   const handleRoundOpen = useCallback((payload: RoundOpenPayload) => {
     currentRoundIdRef.current = payload.roundId
@@ -352,18 +380,24 @@ export function RocketGame({ onBack }: RocketGameProps) {
     setBetError(null)
     setApiError(null)
     setFlashRed(false)
-    setElapsedTicks(0)
-  }, [])
+    setElapsedMs(0)
+    startCountdown(payload.bettingDurationMs ?? 5000)
+  }, [startCountdown])
 
   const handleRoundLaunch = useCallback(() => {
     setPhase('flight')
-    setElapsedTicks(0)
+    setElapsedMs(0)
+    setCountdown(null)
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current)
+      countdownRef.current = null
+    }
   }, [])
 
   const handleMultiplierTick = useCallback((payload: MultiplierTickPayload) => {
     if (payload.roundId !== undefined && payload.roundId !== currentRoundIdRef.current) return
     setMultiplier(payload.multiplier)
-    setElapsedTicks((t) => t + 1)
+    if (payload.elapsedMs !== undefined) setElapsedMs(payload.elapsedMs)
   }, [])
 
   const handleRoundCrash = useCallback((payload: RoundCrashPayload) => {
@@ -373,12 +407,13 @@ export function RocketGame({ onBack }: RocketGameProps) {
     setMultiplier(payload.crashPoint)
     setFlashRed(true)
     setTimeout(() => setFlashRed(false), 600)
+    startCountdown(payload.cooldownDurationMs ?? 3000)
 
     // Determine if user lost
     if (hasActiveBetRef.current && !cashedOutRef.current) {
       setLostRound(true)
     }
-  }, [])
+  }, [startCountdown])
 
   const handleCashoutConfirmed = useCallback((payload: CashoutConfirmedPayload) => {
     setCashedOut(true)
@@ -387,8 +422,20 @@ export function RocketGame({ onBack }: RocketGameProps) {
   }, [setBalance])
 
   const handleRoundState = useCallback((payload: RoundStatePayload) => {
+    currentRoundIdRef.current = payload.roundId
     setPhase(payload.phase)
     setMultiplier(payload.multiplier)
+    setCrashedAt(null)
+    setElapsedMs(payload.elapsedMs ?? 0)
+  }, [])
+
+  const handleBetRestored = useCallback((payload: { bet: number; cashedOut: boolean; cashoutAt: number | null }) => {
+    setBet(payload.bet)
+    setHasActiveBet(true)
+    if (payload.cashedOut && payload.cashoutAt !== null) {
+      setCashedOut(true)
+      setCashoutResult({ cashoutAt: payload.cashoutAt, payout: Math.floor(payload.bet * payload.cashoutAt) })
+    }
   }, [])
 
   useEffect(() => {
@@ -408,12 +455,17 @@ export function RocketGame({ onBack }: RocketGameProps) {
     socket.on('round:crash', handleRoundCrash)
     socket.on('cashout:confirmed', handleCashoutConfirmed)
     socket.on('round:state', handleRoundState)
+    socket.on('bet:restored', handleBetRestored)
 
     return () => {
       socket.disconnect()
       socketRef.current = null
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current)
+        countdownRef.current = null
+      }
     }
-  }, [user?.telegram_id, handleRoundOpen, handleRoundLaunch, handleMultiplierTick, handleRoundCrash, handleCashoutConfirmed, handleRoundState])
+  }, [user?.telegram_id, handleRoundOpen, handleRoundLaunch, handleMultiplierTick, handleRoundCrash, handleCashoutConfirmed, handleRoundState, handleBetRestored])
 
   async function handlePlaceBet() {
     if (isPlacingBet || phase !== 'betting') return
@@ -455,15 +507,16 @@ export function RocketGame({ onBack }: RocketGameProps) {
   const displayMultiplier = multiplier.toFixed(2)
 
   function getStatusText(): string {
+    const countdownStr = countdown !== null && countdown > 0 ? ` (${countdown}s)` : ''
     switch (phase) {
       case 'betting':
-        return 'Place your bets!'
+        return `Place your bets!${countdownStr}`
       case 'flight':
         return ''
       case 'crash':
         return `Crashed at ${crashedAt?.toFixed(2)}x`
       case 'cooldown':
-        return 'Next round starting...'
+        return `Next round starting...${countdownStr}`
     }
   }
 
@@ -489,7 +542,7 @@ export function RocketGame({ onBack }: RocketGameProps) {
               phase={phase}
               crashedAt={crashedAt}
               cashedOutAt={cashoutResult?.cashoutAt ?? null}
-              elapsedTicks={elapsedTicks}
+              elapsedMs={elapsedMs}
             />
           ) : (
             /* Waiting / betting state — show status in the chart area */
@@ -565,7 +618,9 @@ export function RocketGame({ onBack }: RocketGameProps) {
         {phase === 'betting' && hasActiveBet && (
           <div className="bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-center">
             <p className="text-white font-semibold">Bet placed: {bet} coins</p>
-            <p className="text-neutral-400 text-sm mt-1">Waiting for round to start...</p>
+            <p className="text-neutral-400 text-sm mt-1">
+              Launching in {countdown !== null && countdown > 0 ? `${countdown}s` : '...'}
+            </p>
           </div>
         )}
 
@@ -591,7 +646,9 @@ export function RocketGame({ onBack }: RocketGameProps) {
         {(phase === 'crash' || phase === 'cooldown') && !hasActiveBet && (
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-center">
             <p className="text-neutral-400 text-sm">
-              {phase === 'cooldown' ? 'Next round starting...' : 'Betting opens next round'}
+              {countdown !== null && countdown > 0
+                ? `Next round in ${countdown}s`
+                : 'Next round starting...'}
             </p>
           </div>
         )}

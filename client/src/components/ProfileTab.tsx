@@ -5,7 +5,6 @@ import { getMeStats } from '../lib/api'
 export function ProfileTab() {
   const { user } = useApp()
   const avatarUrl = user?.photo_url || '/mc_logo.png'
-  const [totalWagered, setTotalWagered] = useState(0)
   const [totalWon, setTotalWon] = useState(0)
 
   useEffect(() => {
@@ -15,11 +14,9 @@ export function ProfileTab() {
       try {
         const stats = await getMeStats()
         if (!isMounted) return
-        setTotalWagered(stats.totalWagered ?? 0)
         setTotalWon(stats.totalWon ?? 0)
       } catch {
         if (!isMounted) return
-        setTotalWagered(0)
         setTotalWon(0)
       }
     }
@@ -64,10 +61,6 @@ export function ProfileTab() {
           Stats
         </p>
         <div className="flex flex-col gap-3">
-          <div className="flex justify-between items-center">
-            <span className="text-neutral-400">Total Wagered</span>
-            <span className="text-white font-semibold">🪙 {totalWagered.toLocaleString()}</span>
-          </div>
           <div className="flex justify-between items-center">
             <span className="text-neutral-400">Total Won</span>
             <span className="text-white font-semibold">🪙 {totalWon.toLocaleString()}</span>
