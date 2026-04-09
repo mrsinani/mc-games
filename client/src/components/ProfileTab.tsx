@@ -1,8 +1,34 @@
+import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
+import { getMeStats } from '../lib/api'
 
 export function ProfileTab() {
   const { user } = useApp()
   const avatarUrl = user?.photo_url || '/mc_logo.png'
+  const [totalWagered, setTotalWagered] = useState(0)
+  const [totalWon, setTotalWon] = useState(0)
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadStats() {
+      try {
+        const stats = await getMeStats()
+        if (!isMounted) return
+        setTotalWagered(stats.totalWagered ?? 0)
+        setTotalWon(stats.totalWon ?? 0)
+      } catch {
+        if (!isMounted) return
+        setTotalWagered(0)
+        setTotalWon(0)
+      }
+    }
+
+    void loadStats()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   return (
     <div className="flex flex-col gap-6 p-4 h-full overflow-hidden">
@@ -40,11 +66,11 @@ export function ProfileTab() {
         <div className="flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <span className="text-neutral-400">Total Wagered</span>
-            <span className="text-white font-semibold">🪙 0</span>
+            <span className="text-white font-semibold">🪙 {totalWagered.toLocaleString()}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-neutral-400">Biggest Win</span>
-            <span className="text-white font-semibold">🪙 0</span>
+            <span className="text-neutral-400">Total Won</span>
+            <span className="text-white font-semibold">🪙 {totalWon.toLocaleString()}</span>
           </div>
         </div>
       </div>

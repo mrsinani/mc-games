@@ -71,6 +71,11 @@ export interface MeResponse {
   user: UserResponse
 }
 
+export interface MeStatsResponse {
+  totalWagered: number
+  totalWon: number
+}
+
 export interface AddCoinsResponse {
   newBalance: number
 }
@@ -96,6 +101,10 @@ export function login(): Promise<LoginResponse> {
 
 export function getMe(): Promise<MeResponse> {
   return apiRequest<MeResponse>('/me')
+}
+
+export function getMeStats(): Promise<MeStatsResponse> {
+  return apiRequest<MeStatsResponse>('/me/stats')
 }
 
 export function getConfig(): Promise<Record<string, unknown>> {
