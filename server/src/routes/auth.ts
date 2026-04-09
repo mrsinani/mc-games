@@ -101,7 +101,7 @@ router.post('/telegram-widget', async (req: Request, res: Response): Promise<voi
 })
 
 if (process.env['NODE_ENV'] !== 'production') {
-  router.post('/dev-login', async (req: Request, res: Response): Promise<void> => {
+  router.post('/dev-login', async (_req: Request, res: Response): Promise<void> => {
     const telegram_id = 999999999
     const username = 'dev_user'
     const first_name = 'Dev'
