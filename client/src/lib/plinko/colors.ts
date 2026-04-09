@@ -39,11 +39,11 @@ export function getBinColors(rowCount: RowCount) {
   return {
     background: [
       ...redToYellowBg,
-      ...redToYellowBg.toReversed().slice(isBinsEven ? 0 : 1),
+      ...[...redToYellowBg].reverse().slice(isBinsEven ? 0 : 1),
     ],
     shadow: [
       ...redToYellowShadow,
-      ...redToYellowShadow.toReversed().slice(isBinsEven ? 0 : 1),
+      ...[...redToYellowShadow].reverse().slice(isBinsEven ? 0 : 1),
     ],
   };
 }
