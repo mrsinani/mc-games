@@ -2,9 +2,16 @@ import { useApp } from '../context/AppContext'
 
 export function ProfileTab() {
   const { user } = useApp()
+  const avatarUrl = user?.photo_url || '/mc_logo.png'
 
   return (
     <div className="flex flex-col gap-6 p-4 h-full overflow-hidden">
+      <div className="flex justify-center">
+        <div className="h-20 w-20 rounded-full overflow-hidden bg-white border border-neutral-700">
+          <img src={avatarUrl} alt="Profile picture" className="h-full w-full object-cover" />
+        </div>
+      </div>
+
       <div className="flex flex-col gap-1">
         <p className="text-neutral-400 text-sm">Username</p>
         <p className="text-white font-semibold text-lg">

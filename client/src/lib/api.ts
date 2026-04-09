@@ -59,6 +59,7 @@ export interface UserResponse {
   telegram_id: number
   username: string
   first_name: string
+  photo_url?: string
   balance: number
 }
 

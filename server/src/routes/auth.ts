@@ -9,15 +9,15 @@ const BOT_TOKEN = process.env['BOT_TOKEN']!
 const AUTH_MAX_AGE_SECONDS = 60 * 60 * 24
 
 router.post('/login', authMiddleware, async (req: Request, res: Response): Promise<void> => {
-  const { telegram_id, username, first_name } = req.user!
+  const { telegram_id, username, first_name, photo_url } = req.user!
 
   const { data, error } = await supabase
     .from('users')
     .upsert(
-      { telegram_id, username, first_name, last_seen_at: new Date().toISOString() },
+      { telegram_id, username, first_name, photo_url, last_seen_at: new Date().toISOString() },
       { onConflict: 'telegram_id' }
     )
-    .select('telegram_id, username, first_name, balance')
+    .select('telegram_id, username, first_name, photo_url, balance')
     .single()
 
   if (error) {
@@ -73,11 +73,12 @@ router.post('/telegram-widget', async (req: Request, res: Response): Promise<voi
         telegram_id: fields.id,
         username: fields.username,
         first_name: fields.first_name,
+        photo_url: fields.photo_url,
         last_seen_at: new Date().toISOString(),
       },
       { onConflict: 'telegram_id' }
     )
-    .select('telegram_id, username, first_name, balance')
+    .select('telegram_id, username, first_name, photo_url, balance')
     .single()
 
   if (upsertError || !userData) {
@@ -112,7 +113,7 @@ if (process.env['NODE_ENV'] !== 'production') {
         { telegram_id, username, first_name, last_seen_at: new Date().toISOString() },
         { onConflict: 'telegram_id' }
       )
-      .select('telegram_id, username, first_name, balance')
+      .select('telegram_id, username, first_name, photo_url, balance')
       .single()
 
     if (upsertError || !userData) {

@@ -9,7 +9,7 @@ router.get('/me', authMiddleware, async (req: Request, res: Response): Promise<v
 
   const { data, error } = await supabase
     .from('users')
-    .select('telegram_id, username, first_name, balance')
+    .select('telegram_id, username, first_name, photo_url, balance')
     .eq('telegram_id', telegram_id)
     .single()
 

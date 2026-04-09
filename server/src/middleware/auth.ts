@@ -9,6 +9,7 @@ declare global {
         telegram_id: number
         username?: string
         first_name?: string
+        photo_url?: string
       }
     }
   }
@@ -46,7 +47,7 @@ function validateTelegramInitData(initData: string): Express.Request['user'] | n
   const userStr = params.get('user')
   if (!userStr) return null
 
-  let rawUser: { id: number; username?: string; first_name?: string }
+  let rawUser: { id: number; username?: string; first_name?: string; photo_url?: string }
   try {
     rawUser = JSON.parse(userStr)
   } catch {
@@ -57,6 +58,7 @@ function validateTelegramInitData(initData: string): Express.Request['user'] | n
     telegram_id: rawUser.id,
     username: rawUser.username,
     first_name: rawUser.first_name,
+    photo_url: rawUser.photo_url,
   }
 }
 
@@ -103,7 +105,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
 
     const { data: userData, error: userError } = await supabase
       .from('users')
-      .select('telegram_id, username, first_name')
+      .select('telegram_id, username, first_name, photo_url')
       .eq('telegram_id', session.user_id)
       .single()
 
@@ -116,6 +118,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
       telegram_id: userData.telegram_id,
       username: userData.username,
       first_name: userData.first_name,
+      photo_url: userData.photo_url,
     }
     next()
     return
