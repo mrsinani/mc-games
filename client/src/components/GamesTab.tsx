@@ -1,14 +1,15 @@
 import { useApp } from '../context/AppContext'
+import { Circle, Rocket, RotateCw, type LucideIcon } from 'lucide-react'
 
 interface GameCardProps {
-  icon: string
+  icon: LucideIcon
   title: string
   subtitle: string
   enabled: boolean
   onClick?: () => void
 }
 
-function GameCard({ icon, title, subtitle, enabled, onClick }: GameCardProps) {
+function GameCard({ icon: Icon, title, subtitle, enabled, onClick }: GameCardProps) {
   return (
     <div
       onClick={enabled ? onClick : undefined}
@@ -18,7 +19,7 @@ function GameCard({ icon, title, subtitle, enabled, onClick }: GameCardProps) {
           : 'opacity-50 cursor-default'
       }`}
     >
-      <span className="text-3xl">{icon}</span>
+      <Icon className="size-7 text-white shrink-0" strokeWidth={1.5} />
       <div className="flex-1 min-w-0">
         <p className="text-white font-semibold">{title}</p>
         <p className="text-neutral-400 text-sm">{subtitle}</p>
@@ -50,21 +51,21 @@ export function GamesTab({ onGameSelect }: GamesTabProps) {
   return (
     <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
       <GameCard
-        icon="🔮"
+        icon={Circle}
         title="Plinko"
         subtitle="Drop & win up to 10x"
         enabled={plinkoEnabled}
         onClick={() => onGameSelect('plinko')}
       />
       <GameCard
-        icon="🚀"
+        icon={Rocket}
         title="Rocket"
         subtitle="Cash out before crash"
         enabled={rocketEnabled}
         onClick={() => onGameSelect('rocket')}
       />
       <GameCard
-        icon="🎡"
+        icon={RotateCw}
         title="PVP Wheel"
         subtitle="Spin against other players"
         enabled={pvpEnabled}

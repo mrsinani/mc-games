@@ -105,17 +105,36 @@ export function addCoins(): Promise<AddCoinsResponse> {
   return apiRequest<AddCoinsResponse>('/dev/add-coins', { method: 'POST' })
 }
 
-export interface PlinkoResponse {
-  outcomeIndex: number
+export interface PlinkoStartResponse {
+  ticketId: string
+  newBalance: number
+}
+
+export interface PlinkoSettleResponse {
+  binIndex: number
   multiplier: number
   payout: number
   newBalance: number
 }
 
-export function playPlinko(bet: number): Promise<PlinkoResponse> {
-  return apiRequest<PlinkoResponse>('/plinko/play', {
+export function startPlinko(
+  bet: number,
+  rowCount: number,
+  riskLevel: string,
+): Promise<PlinkoStartResponse> {
+  return apiRequest<PlinkoStartResponse>('/plinko/start', {
     method: 'POST',
-    body: JSON.stringify({ bet }),
+    body: JSON.stringify({ bet, rowCount, riskLevel }),
+  })
+}
+
+export function settlePlinko(
+  ticketId: string,
+  binIndex: number,
+): Promise<PlinkoSettleResponse> {
+  return apiRequest<PlinkoSettleResponse>('/plinko/settle', {
+    method: 'POST',
+    body: JSON.stringify({ ticketId, binIndex }),
   })
 }
 

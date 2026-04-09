@@ -1,323 +1,381 @@
-import { useEffect, useRef, useState } from 'react'
-import Phaser from 'phaser'
-import { playPlinko, type PlinkoResponse } from '../lib/api'
+import { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react'
+import { ArrowLeft, Settings } from 'lucide-react'
+import { startPlinko, settlePlinko } from '../lib/api'
 import { useApp } from '../context/AppContext'
+import PlinkoEngine from '../lib/plinko/PlinkoEngine'
+import { binPayouts, autoBetIntervalMs, rowCountOptions } from '../lib/plinko/constants'
+import { RiskLevel, BetMode, type RowCount, type WinRecord } from '../lib/plinko/types'
+import { BinsRow } from './plinko/BinsRow'
+import { LastWins } from './plinko/LastWins'
+import { MenuPanel } from './plinko/MenuPanel'
 
 interface PlinkoGameProps {
   onBack: () => void
 }
 
-const BUCKET_MULTIPLIERS = ['0.2x', '0.5x', '1.5x', '3x', '10x']
-// Normalized center x position for each bucket (0-1)
-const BUCKET_X_NORM = [0.1, 0.3, 0.5, 0.7, 0.9]
-
-const DROP_EVENT = 'plinko-drop'
-
-class PlinkoScene extends Phaser.Scene {
-  private ballBody: MatterJS.BodyType | null = null
-  private ballGfx!: Phaser.GameObjects.Graphics
-  private targetIndex = 2
-  private onLanded: ((bucket: number) => void) | null = null
-  private dropping = false
-  private W = 0
-  private H = 0
-  private boardBottom = 0
-
-  constructor() {
-    super({ key: 'PlinkoScene' })
-  }
-
-  create() {
-    this.W = this.scale.width
-    this.H = this.scale.height
-    this.boardBottom = this.H * 0.72
-
-    this.ballGfx = this.add.graphics()
-    this.buildBoard()
-
-    this.game.events.on(
-      DROP_EVENT,
-      (payload: { outcomeIndex: number; onLanded: (b: number) => void }) => {
-        this.targetIndex = payload.outcomeIndex
-        this.onLanded = payload.onLanded
-        this.startDrop()
-      },
-      this,
-    )
-  }
-
-  private buildBoard() {
-    const g = this.add.graphics()
-    const ROWS = 8
-    const PEG_R = 5
-    const TOP = this.H * 0.10
-    const ROW_SPACING = (this.boardBottom - TOP) / (ROWS - 1)
-
-    g.fillStyle(0xffffff)
-
-    for (let row = 0; row < ROWS; row++) {
-      const y = TOP + row * ROW_SPACING
-      const odd = row % 2 === 1
-      const n = odd ? 6 : 5
-
-      for (let col = 0; col < n; col++) {
-        const x = (col + 1) * (this.W / (n + 1))
-        g.fillCircle(x, y, PEG_R)
-        this.matter.add.circle(x, y, PEG_R, {
-          isStatic: true,
-          restitution: 0.5,
-          friction: 0,
-          frictionStatic: 0,
-        } as Phaser.Types.Physics.Matter.MatterBodyConfig)
-      }
-    }
-
-    // Bucket borders
-    const bucketW = this.W / 5
-    const bucketTop = this.boardBottom + 6
-    const bucketH = 36
-
-    g.lineStyle(1, 0x444444)
-    g.strokeRect(0, bucketTop, this.W, bucketH)
-    for (let i = 1; i < 5; i++) {
-      g.lineBetween(i * bucketW, bucketTop, i * bucketW, bucketTop + bucketH)
-    }
-
-    // Multiplier labels
-    for (let i = 0; i < 5; i++) {
-      this.add
-        .text((i + 0.5) * bucketW, bucketTop + bucketH / 2, BUCKET_MULTIPLIERS[i], {
-          color: '#ffffff',
-          fontSize: '11px',
-          fontFamily: 'monospace',
-        })
-        .setOrigin(0.5)
-    }
-
-    // Side walls to keep ball in bounds
-    const wallOpts: Phaser.Types.Physics.Matter.MatterBodyConfig = { isStatic: true }
-    this.matter.add.rectangle(-2, this.H / 2, 4, this.H, wallOpts)
-    this.matter.add.rectangle(this.W + 2, this.H / 2, 4, this.H, wallOpts)
-  }
-
-  private startDrop() {
-    if (this.dropping) return
-    this.dropping = true
-
-    if (this.ballBody) {
-      this.matter.world.remove(this.ballBody)
-      this.ballBody = null
-    }
-
-    const BALL_R = 7
-    const startX = this.W / 2 + (Math.random() - 0.5) * 8
-    const startY = 18
-
-    this.ballBody = this.matter.add.circle(startX, startY, BALL_R, {
-      restitution: 0.45,
-      friction: 0.04,
-      frictionAir: 0.012,
-      density: 0.002,
-    } as Phaser.Types.Physics.Matter.MatterBodyConfig)
-
-    // Initial horizontal nudge toward target bucket
-    const targetX = BUCKET_X_NORM[this.targetIndex] * this.W
-    const dx = targetX - startX
-    const vx = (dx / this.W) * 4.5
-    this.matter.body.setVelocity(this.ballBody, { x: vx, y: 0 })
-  }
-
-  update() {
-    this.ballGfx.clear()
-
-    if (!this.ballBody || !this.dropping) return
-
-    const pos = this.ballBody.position
-    this.ballGfx.fillStyle(0xffffff)
-    this.ballGfx.fillCircle(pos.x, pos.y, 7)
-
-    // Continuous corrective force — ramps up as ball falls lower
-    const targetX = BUCKET_X_NORM[this.targetIndex] * this.W
-    const progress = Math.max(0, Math.min(1, (pos.y - 20) / (this.boardBottom - 20)))
-    const factor = 0.0000025 + progress * 0.000018
-    this.matter.body.applyForce(this.ballBody, pos, { x: (targetX - pos.x) * factor, y: 0 })
-
-    // Detect landing
-    if (pos.y > this.boardBottom + 4) {
-      const bucket = Math.max(0, Math.min(4, Math.floor(pos.x / (this.W / 5))))
-      this.dropping = false
-      this.matter.world.remove(this.ballBody)
-      this.ballBody = null
-      this.ballGfx.clear()
-
-      // Flash winning bucket
-      const bucketW = this.W / 5
-      const hl = this.add.graphics()
-      hl.fillStyle(0xffffff, 0.18)
-      hl.fillRect(bucket * bucketW, this.boardBottom + 6, bucketW, 36)
-      this.time.delayedCall(900, () => hl.destroy())
-
-      const cb = this.onLanded
-      this.onLanded = null
-      if (cb) this.time.delayedCall(350, () => cb(bucket))
-    }
-  }
+interface BallTicketInfo {
+  ticketId: string
+  bet: number
+  rowCount: RowCount
+  riskLevel: RiskLevel
 }
 
+let winIdCounter = 0
+
 export function PlinkoGame({ onBack }: PlinkoGameProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const gameRef = useRef<Phaser.Game | null>(null)
-  const { setBalance, config } = useApp()
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const engineRef = useRef<PlinkoEngine | null>(null)
+  const { user, setBalance, config } = useApp()
 
   const minBet = Math.max(1, Number(config?.['min_bet']) || 1)
   const maxBet = Math.max(minBet, Number(config?.['max_bet']) || 10000)
 
-  const [bet, setBet] = useState(minBet)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [result, setResult] = useState<{ multiplier: number; payout: number } | null>(null)
-  const [betError, setBetError] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [betAmount, setBetAmount] = useState(minBet)
+  const [riskLevel, setRiskLevel] = useState(RiskLevel.LOW)
+  const [rowCount, setRowCount] = useState<RowCount>(16)
+  const [betMode, setBetMode] = useState(BetMode.MANUAL)
+  const [autoBetCount, setAutoBetCount] = useState(0)
+  const [isAutoRunning, setIsAutoRunning] = useState(false)
+  const [winRecords, setWinRecords] = useState<WinRecord[]>([])
+  const [lastWinBinIndex, setLastWinBinIndex] = useState<number | null>(null)
+  const [binsWidth, setBinsWidth] = useState(0.8)
+  const [ballsInFlight, setBallsInFlight] = useState(0)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [canvasWidth, setCanvasWidth] = useState(0)
 
+  const autoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const autoBetsLeftRef = useRef<number | null>(null)
+  // Optimistic balance that debits instantly on drop, before server confirms.
+  const displayBalanceRef = useRef(user?.balance ?? 0)
+
+  // Ticket info per ball — used to settle when the ball lands
+  const ballTickets = useRef<Map<number, BallTicketInfo>>(new Map())
+
+  const betAmountRef = useRef(betAmount)
+  const riskLevelRef = useRef(riskLevel)
+  const rowCountRef = useRef(rowCount)
+  betAmountRef.current = betAmount
+  riskLevelRef.current = riskLevel
+  rowCountRef.current = rowCount
+
+  // Sync optimistic balance from server when idle (no balls in flight)
   useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
+    if (ballsInFlight === 0 && user) {
+      displayBalanceRef.current = user.balance
+    }
+  }, [ballsInFlight, user?.balance])
 
-    const width = container.offsetWidth || 360
-    const height = container.offsetHeight || 300
+  // Stable ref so engine never needs recreation when deps change
+  const ballLandRef = useRef((_event: { ballId: number; binIndex: number }) => {})
+  ballLandRef.current = (event: { ballId: number; binIndex: number }) => {
+    setBallsInFlight((prev) => Math.max(0, prev - 1))
 
-    const config: Phaser.Types.Core.GameConfig = {
-      type: Phaser.AUTO,
-      width,
-      height,
-      backgroundColor: '#000000',
-      parent: container,
-      physics: {
-        default: 'matter',
-        matter: {
-          gravity: { x: 0, y: 1.8 },
-          debug: false,
-        },
-      },
-      scene: PlinkoScene,
+    const info = ballTickets.current.get(event.ballId)
+    ballTickets.current.delete(event.ballId)
+
+    if (!info) {
+      setLastWinBinIndex(event.binIndex)
+      return
     }
 
-    gameRef.current = new Phaser.Game(config)
+    // Show result immediately from client-side payout table
+    const multiplier = binPayouts[info.rowCount][info.riskLevel][event.binIndex]
+    const payoutValue = Math.floor(info.bet * (multiplier ?? 0))
+    const record: WinRecord = {
+      id: String(++winIdCounter),
+      betAmount: info.bet,
+      rowCount: info.rowCount,
+      binIndex: event.binIndex,
+      payout: { multiplier: multiplier ?? 0, value: payoutValue },
+      profit: payoutValue - info.bet,
+    }
+
+    setLastWinBinIndex(event.binIndex)
+    displayBalanceRef.current += payoutValue
+    setBalance(displayBalanceRef.current)
+    setWinRecords((prev) => [...prev.slice(-50), record])
+
+    // Settle with server in background using the ticket
+    settlePlinko(info.ticketId, event.binIndex)
+      .then((res) => {
+        // Server balance is authoritative
+        displayBalanceRef.current = res.newBalance
+        setBalance(res.newBalance)
+      })
+      .catch((err) => {
+        setApiError(err instanceof Error ? err.message : 'Settlement failed')
+      })
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const engine = new PlinkoEngine({
+      canvas,
+      rowCount,
+      onBallLand: (event) => ballLandRef.current(event),
+    })
+    engine.start()
+    engineRef.current = engine
+    setBinsWidth(engine.binsWidthPercentage)
 
     return () => {
-      gameRef.current?.destroy(true)
-      gameRef.current = null
+      engine.destroy()
+      engineRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ro = new ResizeObserver(([entry]) => {
+      setCanvasWidth(entry.contentRect.width)
+    })
+    ro.observe(canvas)
+    setCanvasWidth(canvas.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine) return
+    engine.updateRowCount(rowCount)
+    setBinsWidth(engine.binsWidthPercentage)
+  }, [rowCount])
+
+  const dropOneBall = useCallback(async () => {
+    const bet = betAmountRef.current
+    const rc = rowCountRef.current
+    const rl = riskLevelRef.current
+
+    if (bet < minBet || bet > maxBet) return
+
+    // Optimistic balance check & debit
+    if (bet > displayBalanceRef.current) return
+    displayBalanceRef.current -= bet
+    setBalance(displayBalanceRef.current)
+
+    setApiError(null)
+    setBallsInFlight((prev) => prev + 1)
+
+    // Get a ticket from the server (bet is debited server-side here)
+    const riskName = rl === RiskLevel.LOW ? 'LOW'
+      : rl === RiskLevel.MEDIUM ? 'MEDIUM' : 'HIGH'
+
+    let ticketId: string
+    try {
+      const res = await startPlinko(bet, rc, riskName)
+      ticketId = res.ticketId
+      // Sync with server's confirmed balance
+      displayBalanceRef.current = res.newBalance
+      setBalance(res.newBalance)
+    } catch (err) {
+      // Refund the optimistic debit on failure
+      displayBalanceRef.current += bet
+      setBalance(displayBalanceRef.current)
+      setBallsInFlight((prev) => Math.max(0, prev - 1))
+      setApiError(err instanceof Error ? err.message : 'Failed to place bet')
+      return
+    }
+
+    const engine = engineRef.current
+    if (!engine) return
+    const ballId = engine.dropBall()
+
+    // Store ticket so we can settle when ball lands
+    ballTickets.current.set(ballId, { ticketId, bet, rowCount: rc, riskLevel: rl })
+  }, [minBet, maxBet, setBalance])
+
+  const stopAuto = useCallback(() => {
+    if (autoIntervalRef.current) {
+      clearInterval(autoIntervalRef.current)
+      autoIntervalRef.current = null
+    }
+    setIsAutoRunning(false)
+  }, [])
+
+  const startAuto = useCallback(() => {
+    autoBetsLeftRef.current = autoBetCount === 0 ? null : autoBetCount
+    setIsAutoRunning(true)
+
+    const tick = async () => {
+      if (autoBetsLeftRef.current !== null) {
+        if (autoBetsLeftRef.current <= 0) {
+          stopAuto()
+          return
+        }
+        autoBetsLeftRef.current -= 1
+      }
+      await dropOneBall()
+    }
+
+    autoIntervalRef.current = setInterval(tick, autoBetIntervalMs)
+  }, [autoBetCount, dropOneBall, stopAuto])
+
+  useEffect(() => {
+    return () => {
+      if (autoIntervalRef.current) clearInterval(autoIntervalRef.current)
     }
   }, [])
 
-  const handleDrop = async () => {
-    if (isPlaying) return
-    setApiError(null)
-    setBetError(null)
-    setResult(null)
+  const handleDrop = useCallback(() => {
+    dropOneBall()
+  }, [dropOneBall])
 
-    if (bet < minBet || bet > maxBet) {
-      setBetError(`Bet must be between ${minBet} and ${maxBet}`)
-      return
-    }
-
-    setIsPlaying(true)
-
-    let response: PlinkoResponse
-    try {
-      response = await playPlinko(bet)
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Failed to place bet')
-      setIsPlaying(false)
-      return
-    }
-
-    const game = gameRef.current
-    if (!game) {
-      setIsPlaying(false)
-      return
-    }
-
-    game.events.emit(DROP_EVENT, {
-      outcomeIndex: response.outcomeIndex,
-      onLanded: () => {
-        setResult({ multiplier: response.multiplier, payout: response.payout })
-        setBalance(response.newBalance)
-        setIsPlaying(false)
-      },
-    })
-  }
+  const controlsLocked = ballsInFlight > 0 || isAutoRunning
+  const dropDisabled =
+    betAmount < minBet ||
+    betAmount > maxBet ||
+    (user ? betAmount > user.balance : false)
 
   return (
-    <div className="h-dvh bg-black flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800 shrink-0">
+    <div className="h-dvh bg-gray-900 flex flex-col overflow-hidden">
+      {/* Top bar */}
+      <div className="shrink-0 flex items-center justify-between px-3 py-2 bg-gray-900/80 backdrop-blur-sm border-b border-white/5">
         <button
           onClick={onBack}
-          className="text-white text-xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-neutral-900"
+          className="p-2 rounded-lg text-white hover:bg-white/10 transition-colors"
         >
-          ←
+          <ArrowLeft size={20} />
         </button>
-        <h1 className="text-white font-bold text-lg">Plinko</h1>
+        <div className="text-white font-semibold text-sm">
+          ${user?.balance.toLocaleString() ?? '0'}
+        </div>
+        <button
+          onClick={() => setMenuOpen(true)}
+          className="p-2 rounded-lg text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+          title="Auto-bet settings"
+        >
+          <Settings size={18} />
+        </button>
       </div>
 
-      {/* Phaser canvas container — fills remaining space */}
-      <div ref={containerRef} className="w-full flex-1 min-h-0" />
+      {/* Game area */}
+      <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden px-1 py-1">
+        <div className="flex items-start gap-1 max-h-full">
+          {/* Canvas + bins column */}
+          <div className="flex flex-col items-center min-w-0">
+            <canvas
+              ref={canvasRef}
+              width={760}
+              height={570}
+              className="block max-w-full max-h-[calc(100dvh-120px)]"
+              style={{ aspectRatio: '760 / 570' }}
+            />
+            {canvasWidth > 0 && (
+              <div className="mt-0.5" style={{ width: canvasWidth }}>
+                <BinsRow
+                  rowCount={rowCount}
+                  riskLevel={riskLevel}
+                  binsWidthPercent={binsWidth}
+                  lastWinBinIndex={lastWinBinIndex}
+                />
+              </div>
+            )}
+          </div>
+          <div className="shrink-0 hidden sm:block w-12">
+            <LastWins wins={winRecords} />
+          </div>
+        </div>
+        {apiError && (
+          <p className="absolute bottom-16 left-0 right-0 text-red-400 text-xs text-center">{apiError}</p>
+        )}
+      </div>
 
-      {/* Controls */}
-      <div className="shrink-0 flex flex-col gap-3 p-4 border-t border-neutral-800">
-        {/* Bet input + quick bets row */}
-        <div className="flex gap-2 items-end">
-          <div className="flex flex-col gap-1 flex-1">
-            <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
-              Bet
-            </label>
+      {/* Bottom controls */}
+      <div className="shrink-0 bg-slate-800 border-t border-white/5 px-2 py-2 flex gap-1.5 items-center">
+        <select
+          value={riskLevel}
+          onChange={(e) => setRiskLevel(e.target.value as RiskLevel)}
+          disabled={controlsLocked}
+          className="shrink-0 w-16 rounded-md border border-slate-600 bg-slate-900 py-2 px-1.5 text-xs text-white focus:outline-none disabled:opacity-40 appearance-none"
+        >
+          <option value={RiskLevel.LOW}>Low</option>
+          <option value={RiskLevel.MEDIUM}>Med</option>
+          <option value={RiskLevel.HIGH}>High</option>
+        </select>
+
+        <select
+          value={rowCount}
+          onChange={(e) => setRowCount(Number(e.target.value) as RowCount)}
+          disabled={controlsLocked}
+          className="shrink-0 w-14 rounded-md border border-slate-600 bg-slate-900 py-2 px-1.5 text-xs text-white focus:outline-none disabled:opacity-40 appearance-none"
+        >
+          {rowCountOptions.map((rc) => (
+            <option key={rc} value={rc}>{rc}</option>
+          ))}
+        </select>
+
+        <div className="flex flex-1 min-w-0">
+          <div className="relative flex-1 min-w-0">
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs select-none">$</span>
             <input
               type="number"
-              value={bet}
+              value={betAmount}
               onChange={(e) => {
-                setBetError(null)
-                setBet(Math.max(minBet, parseInt(e.target.value) || 0))
+                const v = parseFloat(e.target.value)
+                setBetAmount(isNaN(v) ? 0 : v)
               }}
-              disabled={isPlaying}
-              className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50"
+              disabled={isAutoRunning}
               min={minBet}
               max={maxBet}
+              className="w-full rounded-l-md border border-slate-600 bg-slate-900 py-2 pl-6 pr-1 text-xs text-white focus:outline-none disabled:opacity-40"
             />
           </div>
-          {[10, 50, 100, 500].map((amount) => (
-            <button
-              key={amount}
-              onClick={() => setBet(amount)}
-              disabled={isPlaying}
-              className="bg-neutral-900 border border-neutral-700 text-white text-xs font-medium rounded-lg px-2 py-2 hover:border-neutral-600 disabled:opacity-50"
-            >
-              {amount}
-            </button>
-          ))}
-        </div>
-        {betError && <p className="text-red-400 text-xs">{betError}</p>}
-
-        {/* Drop button + result */}
-        <div className="flex gap-3 items-center">
           <button
-            onClick={handleDrop}
-            disabled={isPlaying}
-            className="flex-1 bg-white text-black font-bold rounded-lg py-3 text-base hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isAutoRunning}
+            onClick={() => setBetAmount(Math.max(minBet, Math.floor(betAmount / 2)))}
+            className="bg-slate-700 px-2 text-xs font-bold text-white border-y border-slate-600 hover:bg-slate-600 active:bg-slate-500 disabled:opacity-40"
           >
-            {isPlaying ? 'Dropping…' : 'Drop'}
+            ½
           </button>
-          {result && (
-            <div className="text-center shrink-0">
-              <p className="text-white font-bold text-xl">{result.multiplier}x</p>
-              <p className="text-neutral-400 text-xs">
-                {result.payout > 0 ? `+${result.payout}` : 'No win'}
-              </p>
-            </div>
-          )}
+          <button
+            disabled={isAutoRunning}
+            onClick={() => setBetAmount(Math.min(maxBet, betAmount * 2))}
+            className="bg-slate-700 px-2 text-xs font-bold text-white rounded-r-md border border-slate-600 border-l-0 hover:bg-slate-600 active:bg-slate-500 disabled:opacity-40"
+          >
+            2×
+          </button>
         </div>
 
-        {apiError && <p className="text-red-400 text-sm text-center">{apiError}</p>}
+        <button
+          onClick={isAutoRunning ? stopAuto : handleDrop}
+          disabled={!isAutoRunning && dropDisabled}
+          className={`shrink-0 rounded-md px-5 py-2 font-semibold text-xs transition-colors disabled:bg-neutral-700 disabled:text-neutral-500 ${
+            isAutoRunning
+              ? 'bg-yellow-500 text-slate-900 hover:bg-yellow-400'
+              : 'bg-green-500 text-slate-900 hover:bg-green-400'
+          }`}
+        >
+          {isAutoRunning ? 'Stop' : 'Drop'}
+        </button>
       </div>
+
+      <MenuPanel
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        betAmount={betAmount}
+        setBetAmount={setBetAmount}
+        riskLevel={riskLevel}
+        setRiskLevel={setRiskLevel}
+        rowCount={rowCount}
+        setRowCount={setRowCount}
+        betMode={betMode}
+        setBetMode={setBetMode}
+        autoBetCount={autoBetCount}
+        setAutoBetCount={setAutoBetCount}
+        onDrop={handleDrop}
+        onStartAuto={startAuto}
+        onStopAuto={stopAuto}
+        isAutoRunning={isAutoRunning}
+        hasBallsInFlight={ballsInFlight > 0}
+        dropDisabled={dropDisabled}
+        minBet={minBet}
+        maxBet={maxBet}
+      />
     </div>
   )
 }

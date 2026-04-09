@@ -6,7 +6,7 @@ export function Header() {
 
   return (
     <header className="shrink-0 flex items-center justify-between px-4 py-3 bg-black border-b border-neutral-800">
-      <span className="text-white font-bold text-lg tracking-tight">Casino</span>
+      <span className="text-white font-bold text-lg tracking-tight">MG</span>
       <span className="bg-white text-black text-sm font-semibold rounded-full px-3 py-1">
         🪙 {balance.toLocaleString()}
       </span>

@@ -56,3 +56,12 @@ startRocketEngine(io, supabase)
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)
 })
+
+function shutdown() {
+  console.log('Shutting down server…')
+  httpServer.close()
+  process.exit(0)
+}
+
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)

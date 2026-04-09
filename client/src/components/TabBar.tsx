@@ -1,3 +1,5 @@
+import { Gamepad2, User, Wrench, type LucideIcon } from 'lucide-react'
+
 export type Tab = 'games' | 'profile' | 'dev'
 
 interface TabBarProps {
@@ -5,10 +7,10 @@ interface TabBarProps {
   onChange: (tab: Tab) => void
 }
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'games', label: 'Games', icon: '🎮' },
-  { id: 'profile', label: 'Profile', icon: '👤' },
-  { id: 'dev', label: 'Dev', icon: '🛠' },
+const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
+  { id: 'games', label: 'Games', icon: Gamepad2 },
+  { id: 'profile', label: 'Profile', icon: User },
+  { id: 'dev', label: 'Dev', icon: Wrench },
 ]
 
 export function TabBar({ active, onChange }: TabBarProps) {
@@ -22,7 +24,7 @@ export function TabBar({ active, onChange }: TabBarProps) {
             active === tab.id ? 'text-white' : 'text-neutral-500'
           }`}
         >
-          <span className="text-xl">{tab.icon}</span>
+          <tab.icon className="size-5" strokeWidth={1.5} />
           <span>{tab.label}</span>
         </button>
       ))}
