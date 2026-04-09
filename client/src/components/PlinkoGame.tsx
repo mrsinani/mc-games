@@ -254,31 +254,29 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
       </div>
 
       {/* Game area */}
-      <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden px-1 py-1">
-        <div className="flex items-start gap-1 max-h-full">
-          {/* Canvas + bins column */}
-          <div className="flex flex-col items-center min-w-0">
-            <canvas
-              ref={canvasRef}
-              width={760}
-              height={570}
-              className="block max-w-full max-h-[calc(100dvh-120px)]"
-              style={{ aspectRatio: '760 / 570' }}
-            />
-            {canvasWidth > 0 && (
-              <div className="mt-0.5" style={{ width: canvasWidth }}>
-                <BinsRow
-                  rowCount={rowCount}
-                  riskLevel={riskLevel}
-                  binsWidthPercent={binsWidth}
-                  lastWinBinIndex={lastWinBinIndex}
-                />
-              </div>
-            )}
-          </div>
-          <div className="shrink-0 hidden sm:block w-12">
-            <LastWins wins={winRecords} />
-          </div>
+      <div className="flex-1 relative flex items-center justify-center min-h-0 overflow-hidden px-3 py-3">
+        {/* Canvas + bins column */}
+        <div className="flex flex-col items-center min-w-0 max-h-full">
+          <canvas
+            ref={canvasRef}
+            width={760}
+            height={570}
+            className="block max-w-full max-h-[calc(100dvh-200px)]"
+            style={{ aspectRatio: '760 / 570' }}
+          />
+          {canvasWidth > 0 && (
+            <div className="mt-0.5" style={{ width: canvasWidth }}>
+              <BinsRow
+                rowCount={rowCount}
+                riskLevel={riskLevel}
+                binsWidthPercent={binsWidth}
+                lastWinBinIndex={lastWinBinIndex}
+              />
+            </div>
+          )}
+        </div>
+        <div className="absolute right-3 top-3 hidden sm:block w-12">
+          <LastWins wins={winRecords} />
         </div>
         {apiError && (
           <p className="absolute bottom-16 left-0 right-0 text-red-400 text-xs text-center">{apiError}</p>
