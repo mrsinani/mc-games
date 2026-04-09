@@ -166,9 +166,11 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
       : rl === RiskLevel.MEDIUM ? 'MEDIUM' : 'HIGH'
 
     let ticketId: string
+    let ballPath: number[]
     try {
       const res = await startPlinko(bet, rc, riskName)
       ticketId = res.ticketId
+      ballPath = res.path
       // Sync with server's confirmed balance
       displayBalanceRef.current = res.newBalance
       setBalance(res.newBalance)
@@ -183,7 +185,7 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
 
     const engine = engineRef.current
     if (!engine) return
-    const ballId = engine.dropBall()
+    const ballId = engine.dropBall(ballPath)
 
     // Store ticket so we can settle when ball lands
     ballTickets.current.set(ballId, { ticketId, bet, rowCount: rc, riskLevel: rl })

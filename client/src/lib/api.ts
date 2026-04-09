@@ -118,6 +118,7 @@ export function addCoins(): Promise<AddCoinsResponse> {
 export interface PlinkoStartResponse {
   ticketId: string
   newBalance: number
+  path: number[]
 }
 
 export interface PlinkoSettleResponse {

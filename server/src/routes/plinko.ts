@@ -45,7 +45,7 @@ router.post('/start', authMiddleware, async (req: Request, res: Response): Promi
     return
   }
 
-  res.json(data as { ticketId: string; newBalance: number })
+  res.json(data as { ticketId: string; newBalance: number; path: number[] })
 })
 
 // Settle a plinko round — validates ticket, credits payout
