@@ -3,6 +3,277 @@ import { io as socketIo, Socket } from 'socket.io-client'
 import { rocketPlaceBet, rocketCashout } from '../lib/api'
 import { useApp } from '../context/AppContext'
 
+/* ─── Rising-curve chart component ───────────────────────────────── */
+
+interface CurveChartProps {
+  multiplier: number
+  phase: GamePhase
+  crashedAt: number | null
+  cashedOutAt: number | null
+  elapsedTicks: number
+}
+
+const TICK_MS = 100 // each multiplier tick ≈ 100ms
+
+function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedTicks }: CurveChartProps) {
+  const historyRef = useRef<number[]>([1])
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const rafRef = useRef<number>(0)
+
+  // Accumulate multiplier ticks during flight
+  useEffect(() => {
+    if (phase === 'betting' || phase === 'cooldown') {
+      historyRef.current = [1]
+    } else if (phase === 'flight') {
+      historyRef.current.push(multiplier)
+    } else if (phase === 'crash' && crashedAt !== null) {
+      // only push once
+      const last = historyRef.current[historyRef.current.length - 1]
+      if (last !== crashedAt) historyRef.current.push(crashedAt)
+    }
+  }, [multiplier, phase, crashedAt])
+
+  // Canvas draw loop
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const container = containerRef.current
+    if (!canvas || !container) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    function draw() {
+      const rect = container!.getBoundingClientRect()
+      const dpr = window.devicePixelRatio || 1
+      const w = rect.width
+      const h = rect.height
+      canvas!.width = w * dpr
+      canvas!.height = h * dpr
+      canvas!.style.width = `${w}px`
+      canvas!.style.height = `${h}px`
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+      const history = historyRef.current
+      const pts = history.length
+      const crashed = phase === 'crash'
+
+      // ── background ──
+      ctx!.clearRect(0, 0, w, h)
+
+      // dark card background
+      const bgRadius = 16
+      ctx!.beginPath()
+      ctx!.roundRect(0, 0, w, h, bgRadius)
+      ctx!.fillStyle = '#1a1d26'
+      ctx!.fill()
+
+      const pad = { l: 48, r: 16, t: 20, b: 36 }
+      const chartW = w - pad.l - pad.r
+      const chartH = h - pad.t - pad.b
+
+      // ── y-axis scale ──
+      const maxMul = Math.max(2, ...history) * 1.15
+      const toY = (v: number) => pad.t + chartH - ((v - 1) / (maxMul - 1)) * chartH
+      const toX = (i: number) => pad.l + (pts > 1 ? (i / (pts - 1)) * chartW : chartW / 2)
+
+      // ── y-axis grid lines + labels (left side) ──
+      const gridSteps = getGridSteps(maxMul)
+      for (const v of gridSteps) {
+        const y = toY(v)
+        if (y < pad.t || y > pad.t + chartH) continue
+        // grid line
+        ctx!.strokeStyle = 'rgba(255,255,255,0.07)'
+        ctx!.lineWidth = 1
+        ctx!.setLineDash([3, 3])
+        ctx!.beginPath()
+        ctx!.moveTo(pad.l, y)
+        ctx!.lineTo(w - pad.r, y)
+        ctx!.stroke()
+        ctx!.setLineDash([])
+        // label
+        ctx!.font = '12px ui-monospace, monospace'
+        ctx!.textAlign = 'right'
+        ctx!.fillStyle = 'rgba(255,255,255,0.4)'
+        ctx!.fillText(`${v.toFixed(1)}x`, pad.l - 8, y + 4)
+      }
+      // always draw 1.0x at baseline
+      const baseY = toY(1)
+      ctx!.font = '12px ui-monospace, monospace'
+      ctx!.textAlign = 'right'
+      ctx!.fillStyle = 'rgba(255,255,255,0.4)'
+      ctx!.fillText('1.0x', pad.l - 8, baseY + 4)
+
+      // ── x-axis time labels ──
+      const totalSec = (elapsedTicks * TICK_MS) / 1000
+      const timeSteps = getTimeSteps(totalSec)
+      ctx!.font = '11px ui-monospace, monospace'
+      ctx!.textAlign = 'center'
+      ctx!.fillStyle = 'rgba(255,255,255,0.35)'
+      for (const t of timeSteps) {
+        const frac = totalSec > 0 ? t / totalSec : 0
+        const x = pad.l + frac * chartW
+        if (x < pad.l + 20 || x > w - pad.r - 10) continue
+        ctx!.fillText(`${Math.round(t)}s`, x, h - 8)
+        // small tick mark
+        ctx!.strokeStyle = 'rgba(255,255,255,0.1)'
+        ctx!.lineWidth = 1
+        ctx!.beginPath()
+        ctx!.moveTo(x, pad.t + chartH)
+        ctx!.lineTo(x, pad.t + chartH + 4)
+        ctx!.stroke()
+      }
+
+      if (pts < 2) {
+        rafRef.current = requestAnimationFrame(draw)
+        return
+      }
+
+      // ── gradient fill under curve (solid orange) ──
+      const fillColor = crashed ? 'rgba(239,68,68,0.7)' : 'rgba(245,166,35,0.85)'
+      const fillColorFade = crashed ? 'rgba(239,68,68,0.15)' : 'rgba(245,166,35,0.25)'
+      const grad = ctx!.createLinearGradient(0, pad.t, 0, pad.t + chartH)
+      grad.addColorStop(0, fillColor)
+      grad.addColorStop(1, fillColorFade)
+
+      ctx!.beginPath()
+      ctx!.moveTo(toX(0), toY(history[0]))
+      for (let i = 1; i < pts; i++) {
+        ctx!.lineTo(toX(i), toY(history[i]))
+      }
+      ctx!.lineTo(toX(pts - 1), pad.t + chartH)
+      ctx!.lineTo(toX(0), pad.t + chartH)
+      ctx!.closePath()
+      ctx!.fillStyle = grad
+      ctx!.fill()
+
+      // ── line (white / red on crash) ──
+      const lineColor = crashed ? '#ef4444' : '#ffffff'
+      ctx!.beginPath()
+      ctx!.moveTo(toX(0), toY(history[0]))
+      for (let i = 1; i < pts; i++) {
+        ctx!.lineTo(toX(i), toY(history[i]))
+      }
+      ctx!.strokeStyle = lineColor
+      ctx!.lineWidth = 3
+      ctx!.lineJoin = 'round'
+      ctx!.lineCap = 'round'
+      ctx!.stroke()
+
+      // ── head dot ──
+      const lastX = toX(pts - 1)
+      const lastY = toY(history[pts - 1])
+
+      if (!crashed) {
+        // outer glow
+        ctx!.beginPath()
+        ctx!.arc(lastX, lastY, 12, 0, Math.PI * 2)
+        ctx!.fillStyle = 'rgba(255,255,255,0.15)'
+        ctx!.fill()
+        // white dot
+        ctx!.beginPath()
+        ctx!.arc(lastX, lastY, 6, 0, Math.PI * 2)
+        ctx!.fillStyle = '#ffffff'
+        ctx!.fill()
+      }
+
+      // ── cashout marker ──
+      if (cashedOutAt !== null && cashedOutAt > 1) {
+        const cY = toY(cashedOutAt)
+        let cIdx = history.findIndex((v) => v >= cashedOutAt)
+        if (cIdx === -1) cIdx = pts - 1
+        const cX = toX(cIdx)
+        // dashed horizontal line
+        ctx!.setLineDash([4, 4])
+        ctx!.strokeStyle = 'rgba(255,255,255,0.3)'
+        ctx!.lineWidth = 1
+        ctx!.beginPath()
+        ctx!.moveTo(pad.l, cY)
+        ctx!.lineTo(w - pad.r, cY)
+        ctx!.stroke()
+        ctx!.setLineDash([])
+        // marker dot
+        ctx!.beginPath()
+        ctx!.arc(cX, cY, 7, 0, Math.PI * 2)
+        ctx!.fillStyle = '#ffffff'
+        ctx!.fill()
+        ctx!.beginPath()
+        ctx!.arc(cX, cY, 4, 0, Math.PI * 2)
+        ctx!.fillStyle = '#22c55e'
+        ctx!.fill()
+      }
+
+      // ── crash X marker ──
+      if (crashed) {
+        const size = 12
+        ctx!.strokeStyle = '#ef4444'
+        ctx!.lineWidth = 3.5
+        ctx!.lineCap = 'round'
+        ctx!.beginPath()
+        ctx!.moveTo(lastX - size, lastY - size)
+        ctx!.lineTo(lastX + size, lastY + size)
+        ctx!.moveTo(lastX + size, lastY - size)
+        ctx!.lineTo(lastX - size, lastY + size)
+        ctx!.stroke()
+      }
+
+      // ── multiplier text overlaid on chart ──
+      const mulText = `${(crashed ? crashedAt! : multiplier).toFixed(2)}x`
+      const fontSize = Math.min(w * 0.18, 72)
+      ctx!.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+      ctx!.textAlign = 'center'
+      ctx!.textBaseline = 'middle'
+      // position: center of chart area, shifted a bit toward bottom-left
+      const textX = pad.l + chartW * 0.45
+      const textY = pad.t + chartH * 0.55
+      // shadow for readability
+      ctx!.fillStyle = 'rgba(0,0,0,0.4)'
+      ctx!.fillText(mulText, textX + 2, textY + 2)
+      ctx!.fillStyle = crashed ? '#ef4444' : '#ffffff'
+      ctx!.fillText(mulText, textX, textY)
+
+      rafRef.current = requestAnimationFrame(draw)
+    }
+
+    rafRef.current = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [phase, multiplier, crashedAt, cashedOutAt, elapsedTicks])
+
+  return (
+    <div ref={containerRef} className="w-full h-full relative rounded-2xl overflow-hidden">
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+    </div>
+  )
+}
+
+/** Pick nice grid step values for the y-axis */
+function getGridSteps(maxMul: number): number[] {
+  const steps: number[] = []
+  let step = 0.5
+  if (maxMul > 5) step = 1
+  if (maxMul > 15) step = 2
+  if (maxMul > 30) step = 5
+  if (maxMul > 80) step = 10
+  for (let v = 1 + step; v < maxMul; v += step) {
+    steps.push(v)
+  }
+  return steps
+}
+
+/** Pick time labels for x-axis */
+function getTimeSteps(totalSec: number): number[] {
+  if (totalSec <= 0) return []
+  const steps: number[] = []
+  let step = 2
+  if (totalSec > 15) step = 5
+  if (totalSec > 40) step = 10
+  if (totalSec > 100) step = 20
+  for (let t = step; t < totalSec; t += step) {
+    steps.push(t)
+  }
+  return steps
+}
+
 interface RocketGameProps {
   onBack: () => void
 }
@@ -58,6 +329,7 @@ export function RocketGame({ onBack }: RocketGameProps) {
   const [isPlacingBet, setIsPlacingBet] = useState(false)
   const [isCashingOut, setIsCashingOut] = useState(false)
   const [flashRed, setFlashRed] = useState(false)
+  const [elapsedTicks, setElapsedTicks] = useState(0)
 
   const socketRef = useRef<Socket | null>(null)
   const hasActiveBetRef = useRef(false)
@@ -80,15 +352,18 @@ export function RocketGame({ onBack }: RocketGameProps) {
     setBetError(null)
     setApiError(null)
     setFlashRed(false)
+    setElapsedTicks(0)
   }, [])
 
   const handleRoundLaunch = useCallback(() => {
     setPhase('flight')
+    setElapsedTicks(0)
   }, [])
 
   const handleMultiplierTick = useCallback((payload: MultiplierTickPayload) => {
     if (payload.roundId !== undefined && payload.roundId !== currentRoundIdRef.current) return
     setMultiplier(payload.multiplier)
+    setElapsedTicks((t) => t + 1)
   }, [])
 
   const handleRoundCrash = useCallback((payload: RoundCrashPayload) => {
@@ -182,9 +457,9 @@ export function RocketGame({ onBack }: RocketGameProps) {
   function getStatusText(): string {
     switch (phase) {
       case 'betting':
-        return 'Betting open'
+        return 'Place your bets!'
       case 'flight':
-        return 'Flying...'
+        return ''
       case 'crash':
         return `Crashed at ${crashedAt?.toFixed(2)}x`
       case 'cooldown':
@@ -192,14 +467,8 @@ export function RocketGame({ onBack }: RocketGameProps) {
     }
   }
 
-  function getMultiplierColor(): string {
-    if (phase === 'crash') return 'text-neutral-500'
-    if (phase === 'flight' && multiplier >= 2) return 'text-white'
-    return 'text-white'
-  }
-
   return (
-    <div className="h-dvh bg-black flex flex-col overflow-hidden">
+    <div className="h-dvh bg-[#0e1117] flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800 shrink-0">
         <button
@@ -211,60 +480,42 @@ export function RocketGame({ onBack }: RocketGameProps) {
         <h1 className="text-white font-bold text-lg">Rocket</h1>
       </div>
 
-      {/* Main game area */}
-      <div
-        className={`flex-1 flex flex-col items-center justify-center px-6 transition-opacity duration-150 ${
-          flashRed ? 'opacity-40' : 'opacity-100'
-        }`}
-      >
-        {/* Rocket animation */}
-        <div
-          className={`text-6xl mb-6 transition-transform duration-100 ${
-            phase === 'flight' ? 'animate-bounce' : ''
-          }`}
-          style={{
-            transform: phase === 'crash' ? 'rotate(45deg)' : 'none',
-          }}
-        >
-          🚀
+      {/* Chart area */}
+      <div className="flex-1 flex flex-col min-h-0 px-3 pt-3 pb-2">
+        <div className={`flex-1 min-h-0 transition-opacity duration-150 ${flashRed ? 'opacity-40' : 'opacity-100'}`}>
+          {phase === 'flight' || phase === 'crash' ? (
+            <CurveChart
+              multiplier={multiplier}
+              phase={phase}
+              crashedAt={crashedAt}
+              cashedOutAt={cashoutResult?.cashoutAt ?? null}
+              elapsedTicks={elapsedTicks}
+            />
+          ) : (
+            /* Waiting / betting state — show status in the chart area */
+            <div className="w-full h-full rounded-2xl bg-[#1a1d26] flex flex-col items-center justify-center gap-3">
+              <p className="text-5xl font-black text-white tabular-nums">{displayMultiplier}x</p>
+              <p className="text-neutral-400 text-sm">{getStatusText()}</p>
+            </div>
+          )}
         </div>
 
-        {/* Multiplier display */}
-        <div className={`text-7xl font-black tabular-nums tracking-tight ${getMultiplierColor()}`}>
-          {displayMultiplier}x
-        </div>
-
-        {/* Status text */}
-        <p className="text-neutral-400 text-base mt-3">{getStatusText()}</p>
-
-        {/* Round result feedback */}
-        {phase === 'crash' && hasActiveBet && (
-          <div className="mt-6 text-center">
-            {cashedOut && cashoutResult ? (
-              <div className="bg-neutral-900 border border-neutral-700 rounded-xl px-6 py-4">
-                <p className="text-white font-bold text-xl">+{cashoutResult.payout} coins</p>
-                <p className="text-neutral-400 text-sm mt-1">Cashed out at {cashoutResult.cashoutAt.toFixed(2)}x</p>
-              </div>
-            ) : lostRound ? (
-              <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-6 py-4">
-                <p className="text-neutral-400 font-semibold text-lg">Crashed</p>
-                <p className="text-neutral-500 text-sm mt-1">Better luck next round</p>
-              </div>
-            ) : null}
+        {/* Round result feedback (overlaid below chart) */}
+        {hasActiveBet && (phase === 'crash' || (phase === 'flight' && cashedOut)) && cashoutResult && (
+          <div className="mt-2 bg-[#1a1d26] border border-green-800 rounded-xl px-4 py-3 text-center">
+            <p className="text-green-400 font-bold text-lg">+{cashoutResult.payout} coins</p>
+            <p className="text-neutral-400 text-xs mt-0.5">Cashed out at {cashoutResult.cashoutAt.toFixed(2)}x</p>
           </div>
         )}
-
-        {/* Flight cashout result */}
-        {phase === 'flight' && cashedOut && cashoutResult && (
-          <div className="mt-6 bg-neutral-900 border border-neutral-700 rounded-xl px-6 py-4 text-center">
-            <p className="text-white font-bold text-xl">+{cashoutResult.payout} coins</p>
-            <p className="text-neutral-400 text-sm mt-1">Cashed out at {cashoutResult.cashoutAt.toFixed(2)}x</p>
+        {phase === 'crash' && hasActiveBet && lostRound && !cashedOut && (
+          <div className="mt-2 bg-[#1a1d26] border border-red-900 rounded-xl px-4 py-3 text-center">
+            <p className="text-red-400 font-semibold">Crashed — you lost {bet} coins</p>
           </div>
         )}
       </div>
 
       {/* Controls */}
-      <div className="shrink-0 flex flex-col gap-4 p-4 border-t border-neutral-800">
+      <div className="shrink-0 flex flex-col gap-3 px-3 pb-4 pt-2">
         {/* Betting phase controls */}
         {phase === 'betting' && !hasActiveBet && (
           <>
