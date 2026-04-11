@@ -9,6 +9,7 @@ import userRoutes from './routes/user'
 import devRoutes from './routes/dev'
 import plinkoRoutes from './routes/plinko'
 import rocketRoutes from './routes/rocket'
+import telegramBotRoutes from './routes/telegramBot'
 import { startRocketEngine } from './game/rocketEngine'
 import { supabase } from './lib/supabase'
 
@@ -58,6 +59,7 @@ app.use('/', userRoutes)
 app.use('/dev', devRoutes)
 app.use('/plinko', plinkoRoutes)
 app.use('/rocket', rocketRoutes)
+app.use('/', telegramBotRoutes)
 
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`)
