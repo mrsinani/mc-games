@@ -17,17 +17,32 @@ const httpServer = createServer(app)
 
 const PORT = process.env['PORT'] ?? 3001
 const CLIENT_ORIGIN = process.env['CLIENT_ORIGIN'] ?? 'http://localhost:5173'
-const allowedOrigins = [CLIENT_ORIGIN]
-if (process.env['NODE_ENV'] !== 'production') {
-  allowedOrigins.push('http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173')
-}
 
-app.use(cors({ origin: allowedOrigins, credentials: true }))
+const extraOrigins = (process.env['ADDITIONAL_CORS_ORIGINS'] ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+
+/** Telegram Mini App / WebView uses these; must match Socket.IO + Express or WS fails while REST works. */
+const TELEGRAM_WEB_ORIGINS = ['https://web.telegram.org', 'https://telegram.org'] as const
+
+const allowedOrigins = [
+  CLIENT_ORIGIN,
+  ...extraOrigins,
+  ...TELEGRAM_WEB_ORIGINS,
+  ...(process.env['NODE_ENV'] !== 'production'
+    ? (['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'] as const)
+    : []),
+]
+
+const allowedOriginsUnique = [...new Set(allowedOrigins)]
+
+app.use(cors({ origin: allowedOriginsUnique, credentials: true }))
 app.use(express.json())
 
 export const io = new Server(httpServer, {
   cors: {
-    origin: CLIENT_ORIGIN,
+    origin: allowedOriginsUnique,
     methods: ['GET', 'POST'],
     credentials: true,
   },
