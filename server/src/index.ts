@@ -9,8 +9,10 @@ import userRoutes from './routes/user'
 import devRoutes from './routes/dev'
 import plinkoRoutes from './routes/plinko'
 import rocketRoutes from './routes/rocket'
+import pvpRoutes from './routes/pvp'
 import telegramBotRoutes from './routes/telegramBot'
 import { startRocketEngine } from './game/rocketEngine'
+import { initPvpEngine } from './game/pvpEngine'
 import { supabase } from './lib/supabase'
 
 const app = express()
@@ -59,6 +61,7 @@ app.use('/', userRoutes)
 app.use('/dev', devRoutes)
 app.use('/plinko', plinkoRoutes)
 app.use('/rocket', rocketRoutes)
+app.use('/pvp', pvpRoutes)
 app.use('/', telegramBotRoutes)
 
 io.on('connection', (socket) => {
@@ -69,6 +72,7 @@ io.on('connection', (socket) => {
 })
 
 startRocketEngine(io, supabase)
+initPvpEngine(io, supabase)
 
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)

@@ -124,6 +124,7 @@ export function HomeTab({ onNavigate }: HomeTabProps) {
             icon={RotateCw}
             title="PVP Wheel"
             enabled={pvpEnabled}
+            onClick={() => onNavigate('pvp')}
           />
         </div>
       </div>

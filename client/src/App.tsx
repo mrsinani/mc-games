@@ -6,6 +6,7 @@ import { HomeTab } from './components/HomeTab'
 import { TelegramLogin } from './components/TelegramLogin'
 import { PlinkoGame } from './components/PlinkoGame'
 import { RocketGame } from './components/RocketGame'
+import { PvpGame } from './components/PvpGame'
 
 function AppContent() {
   const { loading, error, needsLogin, loginWithWidgetData, loginAsDev, config } = useApp()
@@ -51,6 +52,7 @@ function AppContent() {
         {activeTab === 'home' && <HomeTab onNavigate={handleTabChange} />}
         {activeTab === 'plinko' && <PlinkoGame />}
         {activeTab === 'rocket' && <RocketGame />}
+        {activeTab === 'pvp' && <PvpGame />}
       </main>
       <TabBar active={activeTab} onChange={handleTabChange} enabledGames={enabledGames} />
     </div>

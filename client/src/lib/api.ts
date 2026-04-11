@@ -172,6 +172,79 @@ export function rocketCashout(): Promise<RocketCashoutResponse> {
   return apiRequest<RocketCashoutResponse>('/rocket/cashout', { method: 'POST' })
 }
 
+// ── PVP ──────────────────────────────────────────────────────────────────────
+
+export interface PvpPlayer {
+  username: string | null
+  first_name: string | null
+  photo_url: string | null
+}
+
+export interface PvpEntry {
+  id: string
+  user_id: number
+  bet: number
+  ticket_start: number
+  ticket_end: number
+  player: PvpPlayer | null
+}
+
+export interface PvpRoom {
+  id: string
+  title: string
+  creator_id: number
+  creator: PvpPlayer | null
+  status: 'open' | 'spinning' | 'finished' | 'cancelled'
+  min_bet: number
+  max_bet: number
+  house_cut_pct: number
+  total_pot: number
+  pvp_entries: PvpEntry[]
+  winner_id: number | null
+  winner_name: string | null
+  winner_photo_url: string | null
+  payout: number | null
+  created_at: string
+  finished_at: string | null
+  // list view extras
+  player_count?: number
+}
+
+export interface PvpRoomsResponse { rooms: PvpRoom[] }
+export interface PvpRoomResponse { room: PvpRoom }
+export interface PvpCreateRoomResponse { room: PvpRoom }
+export interface PvpBetResponse { success: boolean; entry_id: string; ticket_start: number; ticket_end: number; new_balance: number }
+
+export function pvpGetRooms(): Promise<PvpRoomsResponse> {
+  return apiRequest<PvpRoomsResponse>('/pvp/rooms')
+}
+
+export function pvpGetRoom(id: string): Promise<PvpRoomResponse> {
+  return apiRequest<PvpRoomResponse>(`/pvp/rooms/${id}`)
+}
+
+export function pvpCreateRoom(title: string, minBet: number, maxBet: number): Promise<PvpCreateRoomResponse> {
+  return apiRequest<PvpCreateRoomResponse>('/pvp/rooms', {
+    method: 'POST',
+    body: JSON.stringify({ title, minBet, maxBet }),
+  })
+}
+
+export function pvpPlaceBet(roomId: string, bet: number): Promise<PvpBetResponse> {
+  return apiRequest<PvpBetResponse>(`/pvp/rooms/${roomId}/bet`, {
+    method: 'POST',
+    body: JSON.stringify({ bet }),
+  })
+}
+
+export function pvpStartSpin(roomId: string): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/pvp/rooms/${roomId}/start`, { method: 'POST' })
+}
+
+export function pvpCancelRoom(roomId: string): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/pvp/rooms/${roomId}/cancel`, { method: 'POST' })
+}
+
 export async function devLogin(): Promise<WidgetLoginResponse> {
   const res = await fetch(`${API_URL}/auth/dev-login`, {
     method: 'POST',
