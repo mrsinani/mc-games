@@ -257,7 +257,7 @@ export function PlinkoGame() {
       </div>
 
       {/* Controls — scroll if needed (mirrors Rocket bottom section) */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
+      <div className="scrollbar-none flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
         <div className="shrink-0 w-full border-t border-neutral-800 pt-3">
           <div className="flex flex-col gap-3 px-3 pb-3">
             {/* Row 1 — bet + rows + settings (Rocket-style) */}

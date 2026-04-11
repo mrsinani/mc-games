@@ -84,3 +84,12 @@ body {
     var(--tg-content-safe-area-inset-left, 0px)
   );
 }
+
+/* Scroll without showing the native scrollbar (Telegram / mobile polish). */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

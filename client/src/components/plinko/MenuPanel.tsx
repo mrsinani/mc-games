@@ -91,7 +91,7 @@ export function MenuPanel({
           </button>
         </div>
 
-        <div className="flex flex-col gap-4 p-4 overflow-y-auto flex-1">
+        <div className="scrollbar-none flex flex-col gap-4 p-4 overflow-y-auto flex-1">
           {/* Manual / Auto toggle */}
           <div className="flex gap-1 rounded-full bg-slate-900 p-1">
             {([BetMode.MANUAL, BetMode.AUTO] as const).map((mode) => (

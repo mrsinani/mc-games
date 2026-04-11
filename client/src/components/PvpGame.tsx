@@ -643,7 +643,7 @@ export function PvpGame() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
+        <div className="scrollbar-none flex-1 overflow-y-auto px-4 pb-4 space-y-3">
           {loadingRooms && rooms.length === 0 ? (
             <div className="flex items-center justify-center h-32">
               <Loader2 className="size-6 animate-spin text-neutral-500" />
@@ -724,7 +724,7 @@ export function PvpGame() {
         <StatusBadge status={activeRoom.status} />
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="scrollbar-none flex-1 overflow-y-auto">
         {/* Wheel */}
         <div className="flex justify-center px-6 py-2">
           <div className="w-full max-w-[300px] relative">

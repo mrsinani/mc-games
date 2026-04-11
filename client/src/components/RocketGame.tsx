@@ -614,7 +614,7 @@ export function RocketGame() {
       </div>
 
       {/* Bottom section — scrollable: result feedback + live bets + controls */}
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+      <div className="scrollbar-none flex-1 min-h-0 overflow-y-auto flex flex-col">
         {/* Round result feedback */}
         {hasActiveBet && (phase === 'crash' || (phase === 'flight' && cashedOut)) && cashoutResult && (
           <div className="mx-3 mb-2 bg-[#1a1d26] border border-green-800 rounded-xl px-4 py-3 text-center">

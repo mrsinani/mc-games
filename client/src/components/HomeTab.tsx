@@ -80,7 +80,7 @@ export function HomeTab({ onNavigate }: HomeTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-4 h-full overflow-y-auto">
+    <div className="scrollbar-none flex flex-col gap-5 p-4 h-full overflow-y-auto">
       {/* Profile card */}
       <div className="flex items-center gap-4 bg-neutral-900 border border-neutral-800 rounded-xl p-4">
         <div className="h-14 w-14 rounded-full overflow-hidden bg-white border border-neutral-700 shrink-0">
