@@ -42,14 +42,35 @@
   --color-red-500: #ef4444;
 }
 
-html, body, #root {
-  height: 100dvh;
+/*
+  Telegram Mini Apps: the sheet height and insets change when the user expands/collapses
+  the bottom sheet or when Telegram chrome changes. Use Telegram’s CSS vars (see
+  https://core.telegram.org/bots/webapps ) — especially --tg-viewport-stable-height and
+  content safe area — not only env(safe-area-inset-*).
+*/
+html,
+body {
+  height: var(--tg-viewport-stable-height, 100dvh);
+  max-height: var(--tg-viewport-stable-height, 100dvh);
   overflow: hidden;
   background: #000;
 }
 
 #root {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  height: 100%;
+  max-height: 100%;
   box-sizing: border-box;
+  /* Device notch + Telegram / mini-app chrome (max avoids under-padding when one source is 0) */
+  padding-top: max(
+    env(safe-area-inset-top, 0px),
+    var(--tg-content-safe-area-inset-top, 0px),
+    var(--tg-safe-area-inset-top, 0px)
+  );
+  padding-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    var(--tg-content-safe-area-inset-bottom, 0px),
+    var(--tg-safe-area-inset-bottom, 0px)
+  );
+  padding-left: max(env(safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px));
+  padding-right: max(env(safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px));
 }
