@@ -45,10 +45,9 @@
 /*
   Telegram Mini Apps (core.telegram.org/bots/webapps):
   - Height: prefer stable viewport so the sheet isn’t tied to animated viewportHeight.
-  - Insets: use content safe area (--tg-content-safe-area-inset-*) — that’s the inset Telegram
-    defines for your *content* vs their chrome. Do not also max() in device + content + env;
-    that stacks the same margin twice and feels “double padded”.
-  - Outside Telegram, vars are unset → fall back to env(safe-area-inset-*).
+  - Insets: Telegram may set --tg-content-safe-area-inset-* to 0px (valid value). Then
+    var(--x, env(...)) does NOT fall back — iOS home indicator is lost. Use max(env(), tg content).
+  - Avoid also adding --tg-safe-area-inset (device) in the same max — that duplicated the notch before.
 */
 html {
   height: var(--tg-viewport-stable-height, 100dvh);
@@ -68,8 +67,20 @@ body {
   height: 100%;
   max-height: 100%;
   box-sizing: border-box;
-  padding-top: var(--tg-content-safe-area-inset-top, env(safe-area-inset-top, 0px));
-  padding-right: var(--tg-content-safe-area-inset-right, env(safe-area-inset-right, 0px));
-  padding-bottom: var(--tg-content-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-  padding-left: var(--tg-content-safe-area-inset-left, env(safe-area-inset-left, 0px));
+  padding-top: max(
+    env(safe-area-inset-top, 0px),
+    var(--tg-content-safe-area-inset-top, 0px)
+  );
+  padding-right: max(
+    env(safe-area-inset-right, 0px),
+    var(--tg-content-safe-area-inset-right, 0px)
+  );
+  padding-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    var(--tg-content-safe-area-inset-bottom, 0px)
+  );
+  padding-left: max(
+    env(safe-area-inset-left, 0px),
+    var(--tg-content-safe-area-inset-left, 0px)
+  );
 }

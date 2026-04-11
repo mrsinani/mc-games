@@ -19,7 +19,7 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className="h-dvh bg-black flex items-center justify-center">
+      <div className="h-full min-h-0 bg-black flex items-center justify-center">
         <p className="text-white text-lg">Loading...</p>
       </div>
     )
@@ -31,7 +31,7 @@ function AppContent() {
 
   if (error) {
     return (
-      <div className="h-dvh bg-black flex items-center justify-center px-6">
+      <div className="h-full min-h-0 bg-black flex items-center justify-center px-6">
         <p className="text-neutral-400 text-center">{error}</p>
       </div>
     )
@@ -45,7 +45,7 @@ function AppContent() {
   }
 
   return (
-    <div className="h-dvh bg-black flex flex-col overflow-hidden">
+    <div className="h-full min-h-0 bg-black flex flex-col overflow-hidden">
       <Header />
       <main className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'home' && <HomeTab onNavigate={handleTabChange} />}
