@@ -31,7 +31,7 @@ function coerceNumber(val: unknown, defaultVal: number): number {
 
 router.post('/bet', authMiddleware, async (req: Request, res: Response): Promise<void> => {
   const { telegram_id } = req.user!
-  const { bet } = req.body as { bet: unknown }
+  const { bet, autoCashoutAt: rawAutoCashout } = req.body as { bet: unknown; autoCashoutAt?: unknown }
 
   if (typeof bet !== 'number' || !Number.isFinite(bet) || bet <= 0) {
     res.status(400).json({ error: 'Invalid bet amount' })
@@ -97,8 +97,21 @@ router.post('/bet', authMiddleware, async (req: Request, res: Response): Promise
     return
   }
 
-  // Register bet in engine
-  const registered = placeBet(telegram_id, entryData.id as string, bet)
+  // Fetch display name for live bets
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('username, first_name, photo_url')
+    .eq('telegram_id', telegram_id)
+    .single()
+
+  const displayName = userRow?.username || userRow?.first_name || `User ${telegram_id}`
+  const photoUrl = (userRow?.photo_url as string) || null
+
+  const autoCashoutAt = typeof rawAutoCashout === 'number' && isFinite(rawAutoCashout) && rawAutoCashout >= 1.01
+    ? rawAutoCashout
+    : null
+
+  const registered = placeBet(telegram_id, entryData.id as string, bet, displayName, photoUrl, autoCashoutAt)
   if (!registered.ok) {
     // Round ended or user already has an active bet — delete DB entry and refund
     await supabase.from('rocket_entries').delete().eq('id', entryData.id)
@@ -153,8 +166,7 @@ router.post('/cashout', authMiddleware, async (req: Request, res: Response): Pro
     return
   }
 
-  // Both persistence steps succeeded — confirm in-memory state
-  confirmCashout(telegram_id, multiplier)
+  confirmCashout(telegram_id, multiplier, payout)
 
   // Emit cashout:confirmed to user's socket
   emitToUser(telegram_id, 'cashout:confirmed', { cashoutAt: multiplier, payout, newBalance })

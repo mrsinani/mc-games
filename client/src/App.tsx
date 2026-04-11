@@ -2,17 +2,20 @@ import { useState } from 'react'
 import { useApp } from './context/AppContext'
 import { Header } from './components/Header'
 import { TabBar, type Tab } from './components/TabBar'
-import { GamesTab } from './components/GamesTab'
-import { ProfileTab } from './components/ProfileTab'
-import { DevTab } from './components/DevTab'
+import { HomeTab } from './components/HomeTab'
 import { TelegramLogin } from './components/TelegramLogin'
 import { PlinkoGame } from './components/PlinkoGame'
 import { RocketGame } from './components/RocketGame'
 
 function AppContent() {
-  const { loading, error, needsLogin, loginWithWidgetData, loginAsDev } = useApp()
-  const [activeTab, setActiveTab] = useState<Tab>('games')
-  const [activeGame, setActiveGame] = useState<string | null>(null)
+  const { loading, error, needsLogin, loginWithWidgetData, loginAsDev, config } = useApp()
+  const [activeTab, setActiveTab] = useState<Tab>('home')
+
+  const enabledGames = {
+    plinko: Boolean(config?.plinko_enabled),
+    rocket: Boolean(config?.rocket_enabled),
+    pvp: Boolean(config?.pvp_enabled),
+  }
 
   if (loading) {
     return (
@@ -34,23 +37,22 @@ function AppContent() {
     )
   }
 
-  if (activeGame === 'plinko') {
-    return <PlinkoGame onBack={() => setActiveGame(null)} />
-  }
-
-  if (activeGame === 'rocket') {
-    return <RocketGame onBack={() => setActiveGame(null)} />
+  function handleTabChange(tab: Tab) {
+    if (tab === 'plinko' && !enabledGames.plinko) return
+    if (tab === 'rocket' && !enabledGames.rocket) return
+    if (tab === 'pvp' && !enabledGames.pvp) return
+    setActiveTab(tab)
   }
 
   return (
     <div className="h-dvh bg-black flex flex-col overflow-hidden">
       <Header />
       <main className="flex-1 min-h-0 overflow-hidden">
-        {activeTab === 'games' && <GamesTab onGameSelect={setActiveGame} />}
-        {activeTab === 'profile' && <ProfileTab />}
-        {activeTab === 'dev' && <DevTab />}
+        {activeTab === 'home' && <HomeTab onNavigate={handleTabChange} />}
+        {activeTab === 'plinko' && <PlinkoGame />}
+        {activeTab === 'rocket' && <RocketGame />}
       </main>
-      <TabBar active={activeTab} onChange={setActiveTab} />
+      <TabBar active={activeTab} onChange={handleTabChange} enabledGames={enabledGames} />
     </div>
   )
 }

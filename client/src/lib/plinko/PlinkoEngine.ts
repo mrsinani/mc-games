@@ -16,7 +16,7 @@ const HEIGHT = 570
 const PADDING_X = 52
 const PADDING_TOP = 36
 const PADDING_BOTTOM = 28
-const BG = '#0f1728'
+const BG = '#0e1117'
 
 interface Vec2 { x: number; y: number }
 

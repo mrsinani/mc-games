@@ -20,6 +20,10 @@ interface ActiveBet {
   cashedOut: boolean
   cashoutPending: boolean
   cashoutAt: number | null
+  payout: number | null
+  username: string
+  photoUrl: string | null
+  autoCashoutAt: number | null
 }
 
 export interface RoundState {
@@ -28,6 +32,8 @@ export interface RoundState {
   multiplier: number
   serverSeedHash: string
   elapsedMs: number
+  /** When current betting or cooldown window ends (server clock); null in flight. */
+  phaseEndsAt: number | null
 }
 
 // In-memory state
@@ -46,6 +52,8 @@ let roundCount = 0
 let tickInterval: ReturnType<typeof setInterval> | null = null
 let roundStartTime = 0
 let didRotateThisRound = false
+/** Epoch ms when betting or cooldown phase ends; null during flight / idle. */
+let currentPhaseEndsAt: number | null = null
 
 let ioRef: Server | null = null
 let supabaseRef: SupabaseClient | null = null
@@ -57,17 +65,25 @@ export function getRoundState(): RoundState {
     multiplier: currentMultiplier,
     serverSeedHash: currentServerSeedHash,
     elapsedMs: currentPhase === 'flight' ? Date.now() - roundStartTime : 0,
+    phaseEndsAt: currentPhaseEndsAt,
   }
 }
 
 export function placeBet(
   telegramId: number,
   entryId: string,
-  bet: number
+  bet: number,
+  username: string,
+  photoUrl: string | null,
+  autoCashoutAt: number | null
 ): { ok: boolean; reason?: 'phase' | 'duplicate' } {
   if (currentPhase !== 'betting') return { ok: false, reason: 'phase' }
   if (activeBets.has(telegramId)) return { ok: false, reason: 'duplicate' }
-  activeBets.set(telegramId, { entryId, bet, cashedOut: false, cashoutPending: false, cashoutAt: null })
+  activeBets.set(telegramId, {
+    entryId, bet, cashedOut: false, cashoutPending: false, cashoutAt: null,
+    payout: null, username, photoUrl, autoCashoutAt,
+  })
+  broadcastBets()
   return { ok: true }
 }
 
@@ -88,13 +104,15 @@ export function prepareCashout(
   return { multiplier: mult, payout, entryId: betData.entryId }
 }
 
-export function confirmCashout(telegramId: number, mult: number): void {
+export function confirmCashout(telegramId: number, mult: number, payout: number): void {
   const betData = activeBets.get(telegramId)
   if (betData) {
     betData.cashedOut = true
     betData.cashoutPending = false
     betData.cashoutAt = mult
+    betData.payout = payout
     activeBets.set(telegramId, betData)
+    broadcastBets()
   }
 }
 
@@ -118,6 +136,77 @@ export function emitToUser(telegramId: number, event: string, data: unknown): vo
   }
 }
 
+export interface LiveBetEntry {
+  username: string
+  photoUrl: string | null
+  bet: number
+  cashedOut: boolean
+  cashoutAt: number | null
+  payout: number | null
+}
+
+function getActiveBetsList(): LiveBetEntry[] {
+  const list: LiveBetEntry[] = []
+  for (const b of activeBets.values()) {
+    list.push({
+      username: b.username,
+      photoUrl: b.photoUrl,
+      bet: b.bet,
+      cashedOut: b.cashedOut,
+      cashoutAt: b.cashoutAt,
+      payout: b.payout,
+    })
+  }
+  return list
+}
+
+function broadcastBets(): void {
+  if (!ioRef) return
+  ioRef.emit('bets:update', getActiveBetsList())
+}
+
+async function processAutoCashout(telegramId: number, betData: ActiveBet): Promise<void> {
+  if (!supabaseRef) return
+
+  const mult = currentMultiplier
+  const payout = Math.floor(betData.bet * mult)
+
+  betData.cashoutPending = true
+  activeBets.set(telegramId, betData)
+
+  try {
+    const { creditBalance } = await import('../lib/balance')
+    const balanceResult = await creditBalance(telegramId, payout, 'win', 'rocket')
+
+    await supabaseRef
+      .from('rocket_entries')
+      .update({ cashout_at: mult, payout })
+      .eq('id', betData.entryId)
+
+    confirmCashout(telegramId, mult, payout)
+    emitToUser(telegramId, 'cashout:confirmed', {
+      cashoutAt: mult, payout, newBalance: balanceResult.newBalance,
+    })
+  } catch (err) {
+    console.error('Auto-cashout failed for', telegramId, err)
+    betData.cashoutPending = false
+    activeBets.set(telegramId, betData)
+  }
+}
+
+function checkAutoCashouts(): void {
+  for (const [telegramId, betData] of activeBets.entries()) {
+    if (
+      betData.autoCashoutAt !== null &&
+      !betData.cashedOut &&
+      !betData.cashoutPending &&
+      currentMultiplier >= betData.autoCashoutAt
+    ) {
+      void processAutoCashout(telegramId, betData)
+    }
+  }
+}
+
 function rotateSeed(): void {
   previousServerSeed = currentServerSeed
   currentServerSeed = randomBytes(32).toString('hex')
@@ -134,6 +223,7 @@ async function runRound(): Promise<void> {
 
   // Setup round
   currentPhase = 'betting'
+  currentPhaseEndsAt = null
   activeBets.clear()
   currentRoundId = randomUUID()
   currentMultiplier = 1.00
@@ -159,19 +249,27 @@ async function runRound(): Promise<void> {
     console.error('Failed to persist rocket round start:', err)
   }
 
-  // Emit round:open with betting duration so clients can show a countdown
-  const BETTING_DURATION_MS = 5000
+  broadcastBets()
+
+  const BETTING_DURATION_MS = 10_000
+  /** Extra time after the UI countdown hits 0: still accept bets while requests sync in. */
+  const BETTING_GRACE_MS = 1_000
+  const bettingEndsAt = Date.now() + BETTING_DURATION_MS
+  currentPhaseEndsAt = bettingEndsAt
   ioRef.emit('round:open', {
     roundId: currentRoundId,
     serverSeedHash: currentServerSeedHash,
     previousServerSeed: didRotateThisRound ? previousServerSeed : null,
     bettingDurationMs: BETTING_DURATION_MS,
+    bettingEndsAt,
+    bettingGraceMs: BETTING_GRACE_MS,
   })
 
-  await sleep(BETTING_DURATION_MS)
+  await sleep(BETTING_DURATION_MS + BETTING_GRACE_MS)
 
   // Launch phase
   currentPhase = 'flight'
+  currentPhaseEndsAt = null
   roundStartTime = Date.now()
   ioRef.emit('round:launch', { roundId: currentRoundId })
 
@@ -183,6 +281,8 @@ async function runRound(): Promise<void> {
       currentMultiplier = Math.floor(Math.pow(Math.E, 0.00006 * elapsed) * 100) / 100
 
       ioRef.emit('multiplier:tick', { multiplier: currentMultiplier, roundId: currentRoundId, elapsedMs: elapsed })
+
+      checkAutoCashouts()
 
       if (currentMultiplier >= crashPoint) {
         if (tickInterval) {
@@ -198,12 +298,15 @@ async function runRound(): Promise<void> {
   currentPhase = 'crash'
   currentMultiplier = crashPoint
 
-  const COOLDOWN_DURATION_MS = 3000
+  const COOLDOWN_DURATION_MS = 10_000
+  const cooldownEndsAt = Date.now() + COOLDOWN_DURATION_MS
+  currentPhaseEndsAt = cooldownEndsAt
   ioRef.emit('round:crash', {
     crashPoint,
     roundId: currentRoundId,
     revealedSeed: didRotateThisRound ? previousServerSeed : null,
     cooldownDurationMs: COOLDOWN_DURATION_MS,
+    cooldownEndsAt,
   })
 
   // Cooldown: update round row and settle losing entries
@@ -258,6 +361,7 @@ function registerSocketHandlers(socket: Socket): void {
 
   // Send current state to newly connected client
   socket.emit('round:state', getRoundState())
+  socket.emit('bets:update', getActiveBetsList())
 }
 
 export async function startRocketEngine(io: Server, supabase: SupabaseClient): Promise<void> {

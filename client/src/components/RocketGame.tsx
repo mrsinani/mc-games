@@ -3,6 +3,10 @@ import { io as socketIo, Socket } from 'socket.io-client'
 import { rocketPlaceBet, rocketCashout } from '../lib/api'
 import { useApp } from '../context/AppContext'
 
+/** Fallback if server omits absolute end times (must match server defaults). */
+const ROCKET_FALLBACK_BETTING_MS = 10_000
+const ROCKET_FALLBACK_COOLDOWN_MS = 10_000
+
 /* ─── Rising-curve chart component ───────────────────────────────── */
 
 interface CurveChartProps {
@@ -19,13 +23,15 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
   const containerRef = useRef<HTMLDivElement | null>(null)
   const rafRef = useRef<number>(0)
 
+  const propsRef = useRef({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs })
+  propsRef.current = { multiplier, phase, crashedAt, cashedOutAt, elapsedMs }
+
   // Accumulate multiplier ticks during flight
   useEffect(() => {
     if (phase === 'betting' || phase === 'cooldown') {
       historyRef.current = [1]
     } else if (phase === 'flight') {
       if (historyRef.current.length <= 1 && multiplier > 1.01 && elapsedMs > 200) {
-        // Mid-round join: reconstruct curve using the server's formula
         const steps = Math.min(Math.round(elapsedMs / 100), 300)
         const history: number[] = []
         for (let i = 0; i <= steps; i++) {
@@ -42,7 +48,7 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
     }
   }, [multiplier, phase, crashedAt, elapsedMs])
 
-  // Canvas draw loop
+  // Canvas draw loop — runs once, reads latest values from refs
   useEffect(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
@@ -52,6 +58,7 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
     if (!ctx) return
 
     function draw() {
+      const p = propsRef.current
       const rect = container!.getBoundingClientRect()
       const dpr = window.devicePixelRatio || 1
       const w = rect.width
@@ -64,12 +71,10 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
 
       const history = historyRef.current
       const pts = history.length
-      const crashed = phase === 'crash'
+      const crashed = p.phase === 'crash'
 
-      // ── background ──
       ctx!.clearRect(0, 0, w, h)
 
-      // dark card background
       const bgRadius = 16
       ctx!.beginPath()
       ctx!.roundRect(0, 0, w, h, bgRadius)
@@ -80,17 +85,14 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
       const chartW = w - pad.l - pad.r
       const chartH = h - pad.t - pad.b
 
-      // ── y-axis scale ──
       const maxMul = Math.max(2, ...history) * 1.15
       const toY = (v: number) => pad.t + chartH - ((v - 1) / (maxMul - 1)) * chartH
       const toX = (i: number) => pad.l + (pts > 1 ? (i / (pts - 1)) * chartW : chartW / 2)
 
-      // ── y-axis grid lines + labels (left side) ──
       const gridSteps = getGridSteps(maxMul)
       for (const v of gridSteps) {
         const y = toY(v)
         if (y < pad.t || y > pad.t + chartH) continue
-        // grid line
         ctx!.strokeStyle = 'rgba(255,255,255,0.07)'
         ctx!.lineWidth = 1
         ctx!.setLineDash([3, 3])
@@ -99,21 +101,18 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
         ctx!.lineTo(w - pad.r, y)
         ctx!.stroke()
         ctx!.setLineDash([])
-        // label
         ctx!.font = '12px ui-monospace, monospace'
         ctx!.textAlign = 'right'
         ctx!.fillStyle = 'rgba(255,255,255,0.4)'
         ctx!.fillText(`${v.toFixed(1)}x`, pad.l - 8, y + 4)
       }
-      // always draw 1.0x at baseline
       const baseY = toY(1)
       ctx!.font = '12px ui-monospace, monospace'
       ctx!.textAlign = 'right'
       ctx!.fillStyle = 'rgba(255,255,255,0.4)'
       ctx!.fillText('1.0x', pad.l - 8, baseY + 4)
 
-      // ── x-axis time labels ──
-      const totalSec = elapsedMs / 1000
+      const totalSec = p.elapsedMs / 1000
       const timeSteps = getTimeSteps(totalSec)
       ctx!.font = '11px ui-monospace, monospace'
       ctx!.textAlign = 'center'
@@ -123,7 +122,6 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
         const x = pad.l + frac * chartW
         if (x < pad.l + 20 || x > w - pad.r - 10) continue
         ctx!.fillText(`${Math.round(t)}s`, x, h - 8)
-        // small tick mark
         ctx!.strokeStyle = 'rgba(255,255,255,0.1)'
         ctx!.lineWidth = 1
         ctx!.beginPath()
@@ -137,7 +135,6 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
         return
       }
 
-      // ── gradient fill under curve (solid orange) ──
       const fillColor = crashed ? 'rgba(239,68,68,0.7)' : 'rgba(245,166,35,0.85)'
       const fillColorFade = crashed ? 'rgba(239,68,68,0.15)' : 'rgba(245,166,35,0.25)'
       const grad = ctx!.createLinearGradient(0, pad.t, 0, pad.t + chartH)
@@ -155,7 +152,6 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
       ctx!.fillStyle = grad
       ctx!.fill()
 
-      // ── line (white / red on crash) ──
       const lineColor = crashed ? '#ef4444' : '#ffffff'
       ctx!.beginPath()
       ctx!.moveTo(toX(0), toY(history[0]))
@@ -168,30 +164,25 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
       ctx!.lineCap = 'round'
       ctx!.stroke()
 
-      // ── head dot ──
       const lastX = toX(pts - 1)
       const lastY = toY(history[pts - 1])
 
       if (!crashed) {
-        // outer glow
         ctx!.beginPath()
         ctx!.arc(lastX, lastY, 12, 0, Math.PI * 2)
         ctx!.fillStyle = 'rgba(255,255,255,0.15)'
         ctx!.fill()
-        // white dot
         ctx!.beginPath()
         ctx!.arc(lastX, lastY, 6, 0, Math.PI * 2)
         ctx!.fillStyle = '#ffffff'
         ctx!.fill()
       }
 
-      // ── cashout marker ──
-      if (cashedOutAt !== null && cashedOutAt > 1) {
-        const cY = toY(cashedOutAt)
-        let cIdx = history.findIndex((v) => v >= cashedOutAt)
+      if (p.cashedOutAt !== null && p.cashedOutAt > 1) {
+        const cY = toY(p.cashedOutAt)
+        let cIdx = history.findIndex((v) => v >= p.cashedOutAt!)
         if (cIdx === -1) cIdx = pts - 1
         const cX = toX(cIdx)
-        // dashed horizontal line
         ctx!.setLineDash([4, 4])
         ctx!.strokeStyle = 'rgba(255,255,255,0.3)'
         ctx!.lineWidth = 1
@@ -200,7 +191,6 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
         ctx!.lineTo(w - pad.r, cY)
         ctx!.stroke()
         ctx!.setLineDash([])
-        // marker dot
         ctx!.beginPath()
         ctx!.arc(cX, cY, 7, 0, Math.PI * 2)
         ctx!.fillStyle = '#ffffff'
@@ -211,7 +201,6 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
         ctx!.fill()
       }
 
-      // ── crash X marker ──
       if (crashed) {
         const size = 12
         ctx!.strokeStyle = '#ef4444'
@@ -225,16 +214,13 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
         ctx!.stroke()
       }
 
-      // ── multiplier text overlaid on chart ──
-      const mulText = `${(crashed ? crashedAt! : multiplier).toFixed(2)}x`
+      const mulText = `${(crashed ? p.crashedAt! : p.multiplier).toFixed(2)}x`
       const fontSize = Math.min(w * 0.18, 72)
       ctx!.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
       ctx!.textAlign = 'center'
       ctx!.textBaseline = 'middle'
-      // position: center of chart area, shifted a bit toward bottom-left
       const textX = pad.l + chartW * 0.45
       const textY = pad.t + chartH * 0.55
-      // shadow for readability
       ctx!.fillStyle = 'rgba(0,0,0,0.4)'
       ctx!.fillText(mulText, textX + 2, textY + 2)
       ctx!.fillStyle = crashed ? '#ef4444' : '#ffffff'
@@ -245,7 +231,7 @@ function CurveChart({ multiplier, phase, crashedAt, cashedOutAt, elapsedMs }: Cu
 
     rafRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [phase, multiplier, crashedAt, cashedOutAt, elapsedMs])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={containerRef} className="w-full h-full relative rounded-2xl overflow-hidden">
@@ -282,8 +268,13 @@ function getTimeSteps(totalSec: number): number[] {
   return steps
 }
 
-interface RocketGameProps {
-  onBack: () => void
+interface LiveBet {
+  username: string
+  photoUrl: string | null
+  bet: number
+  cashedOut: boolean
+  cashoutAt: number | null
+  payout: number | null
 }
 
 type GamePhase = 'betting' | 'flight' | 'crash' | 'cooldown'
@@ -293,6 +284,10 @@ interface RoundOpenPayload {
   serverSeedHash: string
   previousServerSeed: string | null
   bettingDurationMs?: number
+  /** Server epoch ms when betting closes (authoritative for countdown). */
+  bettingEndsAt?: number
+  /** ms after countdown hits 0 that the server still accepts bets (sync buffer). */
+  bettingGraceMs?: number
 }
 
 interface MultiplierTickPayload {
@@ -306,6 +301,8 @@ interface RoundCrashPayload {
   roundId: string
   revealedSeed: string | null
   cooldownDurationMs?: number
+  /** Server epoch ms when the next round opens (authoritative for countdown). */
+  cooldownEndsAt?: number
 }
 
 interface CashoutConfirmedPayload {
@@ -320,9 +317,10 @@ interface RoundStatePayload {
   multiplier: number
   serverSeedHash: string
   elapsedMs?: number
+  phaseEndsAt?: number | null
 }
 
-export function RocketGame({ onBack }: RocketGameProps) {
+export function RocketGame() {
   const { user, setBalance, config } = useApp()
 
   const minBet = Math.max(1, Number(config?.['min_bet']) || 10)
@@ -332,6 +330,9 @@ export function RocketGame({ onBack }: RocketGameProps) {
   const [multiplier, setMultiplier] = useState(1.00)
   const [crashedAt, setCrashedAt] = useState<number | null>(null)
   const [bet, setBet] = useState(minBet)
+  const [autoCashoutEnabled, setAutoCashoutEnabled] = useState(false)
+  const [autoCashoutValue, setAutoCashoutValue] = useState('2.0')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [hasActiveBet, setHasActiveBet] = useState(false)
   const [cashedOut, setCashedOut] = useState(false)
   const [cashoutResult, setCashoutResult] = useState<{ cashoutAt: number; payout: number } | null>(null)
@@ -343,29 +344,42 @@ export function RocketGame({ onBack }: RocketGameProps) {
   const [flashRed, setFlashRed] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(0)
   const [countdown, setCountdown] = useState<number | null>(null)
+  const [liveBets, setLiveBets] = useState<LiveBet[]>([])
 
   const socketRef = useRef<Socket | null>(null)
   const hasActiveBetRef = useRef(false)
   const cashedOutRef = useRef(false)
   const currentRoundIdRef = useRef<string>('')
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Keep refs in sync
   hasActiveBetRef.current = hasActiveBet
   cashedOutRef.current = cashedOut
 
-  const startCountdown = useCallback((durationMs: number) => {
-    if (countdownRef.current) clearInterval(countdownRef.current)
-    const endsAt = Date.now() + durationMs
-    setCountdown(Math.ceil(durationMs / 1000))
-    countdownRef.current = setInterval(() => {
+  const clearCountdown = useCallback(() => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
+    setCountdown(null)
+  }, [])
+
+  /** Count down to a server-provided instant so reconnects stay in sync and intervals aren’t wiped by effect re-runs. */
+  const syncCountdownToEnd = useCallback((endsAt: number) => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
+    const tick = () => {
       const remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000))
       setCountdown(remaining)
-      if (remaining <= 0 && countdownRef.current) {
-        clearInterval(countdownRef.current)
-        countdownRef.current = null
+      if (remaining <= 0 && countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
       }
-    }, 200)
+    }
+    tick()
+    countdownIntervalRef.current = setInterval(tick, 250)
   }, [])
 
   const handleRoundOpen = useCallback((payload: RoundOpenPayload) => {
@@ -381,18 +395,17 @@ export function RocketGame({ onBack }: RocketGameProps) {
     setApiError(null)
     setFlashRed(false)
     setElapsedMs(0)
-    startCountdown(payload.bettingDurationMs ?? 5000)
-  }, [startCountdown])
+    const endsAt =
+      payload.bettingEndsAt ??
+      Date.now() + (payload.bettingDurationMs ?? ROCKET_FALLBACK_BETTING_MS)
+    syncCountdownToEnd(endsAt)
+  }, [syncCountdownToEnd])
 
   const handleRoundLaunch = useCallback(() => {
     setPhase('flight')
     setElapsedMs(0)
-    setCountdown(null)
-    if (countdownRef.current) {
-      clearInterval(countdownRef.current)
-      countdownRef.current = null
-    }
-  }, [])
+    clearCountdown()
+  }, [clearCountdown])
 
   const handleMultiplierTick = useCallback((payload: MultiplierTickPayload) => {
     if (payload.roundId !== undefined && payload.roundId !== currentRoundIdRef.current) return
@@ -407,13 +420,16 @@ export function RocketGame({ onBack }: RocketGameProps) {
     setMultiplier(payload.crashPoint)
     setFlashRed(true)
     setTimeout(() => setFlashRed(false), 600)
-    startCountdown(payload.cooldownDurationMs ?? 3000)
+    const endsAt =
+      payload.cooldownEndsAt ??
+      Date.now() + (payload.cooldownDurationMs ?? ROCKET_FALLBACK_COOLDOWN_MS)
+    syncCountdownToEnd(endsAt)
 
     // Determine if user lost
     if (hasActiveBetRef.current && !cashedOutRef.current) {
       setLostRound(true)
     }
-  }, [startCountdown])
+  }, [syncCountdownToEnd])
 
   const handleCashoutConfirmed = useCallback((payload: CashoutConfirmedPayload) => {
     setCashedOut(true)
@@ -421,13 +437,33 @@ export function RocketGame({ onBack }: RocketGameProps) {
     setBalance(payload.newBalance)
   }, [setBalance])
 
-  const handleRoundState = useCallback((payload: RoundStatePayload) => {
-    currentRoundIdRef.current = payload.roundId
-    setPhase(payload.phase)
-    setMultiplier(payload.multiplier)
-    setCrashedAt(null)
-    setElapsedMs(payload.elapsedMs ?? 0)
-  }, [])
+  const handleRoundState = useCallback(
+    (payload: RoundStatePayload) => {
+      currentRoundIdRef.current = payload.roundId
+      setPhase(payload.phase)
+      setMultiplier(payload.multiplier)
+      setCrashedAt(null)
+      setElapsedMs(payload.elapsedMs ?? 0)
+
+      if (payload.phase === 'flight') {
+        clearCountdown()
+        return
+      }
+      const end = payload.phaseEndsAt
+      if (payload.phase === 'betting') {
+        if (typeof end === 'number') syncCountdownToEnd(end)
+        else syncCountdownToEnd(Date.now() + ROCKET_FALLBACK_BETTING_MS)
+        return
+      }
+      if (payload.phase === 'cooldown') {
+        if (typeof end === 'number') syncCountdownToEnd(end)
+        else syncCountdownToEnd(Date.now() + ROCKET_FALLBACK_COOLDOWN_MS)
+        return
+      }
+      clearCountdown()
+    },
+    [clearCountdown, syncCountdownToEnd],
+  )
 
   const handleBetRestored = useCallback((payload: { bet: number; cashedOut: boolean; cashoutAt: number | null }) => {
     setBet(payload.bet)
@@ -438,34 +474,59 @@ export function RocketGame({ onBack }: RocketGameProps) {
     }
   }, [])
 
+  const socketHandlersRef = useRef({
+    handleRoundOpen,
+    handleRoundLaunch,
+    handleMultiplierTick,
+    handleRoundCrash,
+    handleCashoutConfirmed,
+    handleRoundState,
+    handleBetRestored,
+  })
+  socketHandlersRef.current = {
+    handleRoundOpen,
+    handleRoundLaunch,
+    handleMultiplierTick,
+    handleRoundCrash,
+    handleCashoutConfirmed,
+    handleRoundState,
+    handleBetRestored,
+  }
+
   useEffect(() => {
     const apiUrl = import.meta.env.VITE_API_URL as string
     const socket = socketIo(apiUrl, { transports: ['websocket', 'polling'] })
     socketRef.current = socket
 
     socket.on('connect', () => {
-      if (user?.telegram_id) {
-        socket.emit('register', { telegramId: user.telegram_id })
-      }
+      const id = user?.telegram_id
+      if (id) socket.emit('register', { telegramId: id })
     })
 
-    socket.on('round:open', handleRoundOpen)
-    socket.on('round:launch', handleRoundLaunch)
-    socket.on('multiplier:tick', handleMultiplierTick)
-    socket.on('round:crash', handleRoundCrash)
-    socket.on('cashout:confirmed', handleCashoutConfirmed)
-    socket.on('round:state', handleRoundState)
-    socket.on('bet:restored', handleBetRestored)
+    socket.on('round:open', (p: RoundOpenPayload) => socketHandlersRef.current.handleRoundOpen(p))
+    socket.on('round:launch', () => socketHandlersRef.current.handleRoundLaunch())
+    socket.on('multiplier:tick', (p: MultiplierTickPayload) =>
+      socketHandlersRef.current.handleMultiplierTick(p),
+    )
+    socket.on('round:crash', (p: RoundCrashPayload) => socketHandlersRef.current.handleRoundCrash(p))
+    socket.on('cashout:confirmed', (p: CashoutConfirmedPayload) =>
+      socketHandlersRef.current.handleCashoutConfirmed(p),
+    )
+    socket.on('round:state', (p: RoundStatePayload) => socketHandlersRef.current.handleRoundState(p))
+    socket.on('bet:restored', (p: { bet: number; cashedOut: boolean; cashoutAt: number | null }) =>
+      socketHandlersRef.current.handleBetRestored(p),
+    )
+    socket.on('bets:update', (bets: LiveBet[]) => setLiveBets(bets))
 
     return () => {
       socket.disconnect()
       socketRef.current = null
-      if (countdownRef.current) {
-        clearInterval(countdownRef.current)
-        countdownRef.current = null
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
       }
     }
-  }, [user?.telegram_id, handleRoundOpen, handleRoundLaunch, handleMultiplierTick, handleRoundCrash, handleCashoutConfirmed, handleRoundState, handleBetRestored])
+  }, [user?.telegram_id])
 
   async function handlePlaceBet() {
     if (isPlacingBet || phase !== 'betting') return
@@ -478,8 +539,10 @@ export function RocketGame({ onBack }: RocketGameProps) {
     }
 
     setIsPlacingBet(true)
+    const parsed = parseFloat(autoCashoutValue)
+    const autoCashoutAt = autoCashoutEnabled && isFinite(parsed) && parsed >= 1.01 ? parsed : null
     try {
-      const result = await rocketPlaceBet(bet)
+      const result = await rocketPlaceBet(bet, autoCashoutAt)
       setHasActiveBet(true)
       setBalance(result.balance)
     } catch (err) {
@@ -492,12 +555,19 @@ export function RocketGame({ onBack }: RocketGameProps) {
   async function handleCashout() {
     if (isCashingOut || phase !== 'flight' || !hasActiveBet || cashedOut) return
     setIsCashingOut(true)
+
+    const snapMultiplier = multiplier
+    const snapPayout = Math.floor(bet * snapMultiplier)
+    setCashedOut(true)
+    setCashoutResult({ cashoutAt: snapMultiplier, payout: snapPayout })
+
     try {
       const result = await rocketCashout()
-      setCashedOut(true)
       setCashoutResult({ cashoutAt: result.cashoutAt, payout: result.payout })
       setBalance(result.newBalance)
     } catch (err) {
+      setCashedOut(false)
+      setCashoutResult(null)
       setApiError(err instanceof Error ? err.message : 'Failed to cash out')
     } finally {
       setIsCashingOut(false)
@@ -505,6 +575,7 @@ export function RocketGame({ onBack }: RocketGameProps) {
   }
 
   const displayMultiplier = multiplier.toFixed(2)
+  const projectedCashoutPayout = Math.floor(bet * multiplier)
 
   function getStatusText(): string {
     const countdownStr = countdown !== null && countdown > 0 ? ` (${countdown}s)` : ''
@@ -521,21 +592,10 @@ export function RocketGame({ onBack }: RocketGameProps) {
   }
 
   return (
-    <div className="h-dvh bg-[#0e1117] flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800 shrink-0">
-        <button
-          onClick={onBack}
-          className="text-white text-xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-neutral-900"
-        >
-          ←
-        </button>
-        <h1 className="text-white font-bold text-lg">Rocket</h1>
-      </div>
-
+    <div className="h-full bg-[#0e1117] flex flex-col overflow-hidden relative">
       {/* Chart area */}
-      <div className="flex-1 flex flex-col min-h-0 px-3 pt-3 pb-2">
-        <div className={`flex-1 min-h-0 transition-opacity duration-150 ${flashRed ? 'opacity-40' : 'opacity-100'}`}>
+      <div className="shrink-0 px-3 pt-3 pb-2" style={{ height: '55%' }}>
+        <div className={`h-full transition-opacity duration-150 ${flashRed ? 'opacity-40' : 'opacity-100'}`}>
           {phase === 'flight' || phase === 'crash' ? (
             <CurveChart
               multiplier={multiplier}
@@ -545,51 +605,88 @@ export function RocketGame({ onBack }: RocketGameProps) {
               elapsedMs={elapsedMs}
             />
           ) : (
-            /* Waiting / betting state — show status in the chart area */
             <div className="w-full h-full rounded-2xl bg-[#1a1d26] flex flex-col items-center justify-center gap-3">
               <p className="text-5xl font-black text-white tabular-nums">{displayMultiplier}x</p>
               <p className="text-neutral-400 text-sm">{getStatusText()}</p>
             </div>
           )}
         </div>
+      </div>
 
-        {/* Round result feedback (overlaid below chart) */}
+      {/* Bottom section — scrollable: result feedback + live bets + controls */}
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+        {/* Round result feedback */}
         {hasActiveBet && (phase === 'crash' || (phase === 'flight' && cashedOut)) && cashoutResult && (
-          <div className="mt-2 bg-[#1a1d26] border border-green-800 rounded-xl px-4 py-3 text-center">
+          <div className="mx-3 mb-2 bg-[#1a1d26] border border-green-800 rounded-xl px-4 py-3 text-center">
             <p className="text-green-400 font-bold text-lg">+{cashoutResult.payout} coins</p>
             <p className="text-neutral-400 text-xs mt-0.5">Cashed out at {cashoutResult.cashoutAt.toFixed(2)}x</p>
           </div>
         )}
         {phase === 'crash' && hasActiveBet && lostRound && !cashedOut && (
-          <div className="mt-2 bg-[#1a1d26] border border-red-900 rounded-xl px-4 py-3 text-center">
+          <div className="mx-3 mb-2 bg-[#1a1d26] border border-red-900 rounded-xl px-4 py-3 text-center">
             <p className="text-red-400 font-semibold">Crashed — you lost {bet} coins</p>
           </div>
         )}
-      </div>
 
-      {/* Controls */}
-      <div className="shrink-0 flex flex-col gap-3 px-3 pb-4 pt-2">
+        {/* Controls */}
+        <div className="shrink-0 flex flex-col gap-3 px-3 pb-3 pt-1">
         {/* Betting phase controls */}
         {phase === 'betting' && !hasActiveBet && (
           <>
-            <div className="flex flex-col gap-1">
-              <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
-                Bet Amount
-              </label>
-              <input
-                type="number"
-                value={bet}
-                onChange={(e) => {
-                  setBetError(null)
-                  setBet(Math.max(1, parseInt(e.target.value) || 0))
-                }}
-                disabled={isPlacingBet}
-                className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50"
-                min={minBet}
-                max={maxBet}
-              />
-              {betError && <p className="text-red-400 text-xs mt-1">{betError}</p>}
+            <div className="flex gap-3">
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
+                  Bet Amount
+                </label>
+                <input
+                  type="number"
+                  value={bet}
+                  onChange={(e) => {
+                    setBetError(null)
+                    setBet(Math.max(1, parseInt(e.target.value) || 0))
+                  }}
+                  disabled={isPlacingBet}
+                  className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50"
+                  min={minBet}
+                  max={maxBet}
+                />
+              </div>
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
+                  Auto Cashout
+                </label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="number"
+                    value={autoCashoutEnabled ? autoCashoutValue : ''}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (val === '') {
+                        setAutoCashoutEnabled(false)
+                      } else {
+                        setAutoCashoutEnabled(true)
+                        setAutoCashoutValue(val)
+                      }
+                    }}
+                    placeholder="Off"
+                    disabled={isPlacingBet}
+                    step="0.1"
+                    min="1.01"
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50 placeholder:text-neutral-600"
+                  />
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
+            {betError && <p className="text-red-400 text-xs">{betError}</p>}
 
             <div className="flex gap-2">
               {[10, 50, 100, 500].map((amount) => (
@@ -616,40 +713,81 @@ export function RocketGame({ onBack }: RocketGameProps) {
 
         {/* Betting phase — bet placed, waiting for launch */}
         {phase === 'betting' && hasActiveBet && (
-          <div className="bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-center">
-            <p className="text-white font-semibold">Bet placed: {bet} coins</p>
-            <p className="text-neutral-400 text-sm mt-1">
-              Launching in {countdown !== null && countdown > 0 ? `${countdown}s` : '...'}
-            </p>
+          <div className="flex gap-2 items-center">
+            <div className="flex-1 bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-center">
+              <p className="text-white font-semibold">Bet placed: {bet} coins</p>
+              <p className="text-neutral-400 text-sm mt-1">
+                Launching in {countdown !== null && countdown > 0 ? `${countdown}s` : '...'}
+              </p>
+            </div>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
           </div>
         )}
 
         {/* Flight phase — cash out button */}
         {phase === 'flight' && hasActiveBet && !cashedOut && (
-          <button
-            onClick={handleCashout}
-            disabled={isCashingOut}
-            className="w-full bg-white text-black font-black rounded-xl py-5 text-2xl hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
-          >
-            {isCashingOut ? 'Cashing Out...' : `Cash Out ${displayMultiplier}x`}
-          </button>
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={handleCashout}
+              disabled={isCashingOut}
+              className="flex-1 flex flex-col items-center justify-center gap-1 rounded-xl py-4 bg-gradient-to-b from-green-500 to-green-600 text-white font-black shadow-lg shadow-black/25 border border-green-400/40 hover:from-green-400 hover:to-green-500 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition-transform"
+            >
+              {isCashingOut ? (
+                <span className="text-xl">Cashing Out...</span>
+              ) : (
+                <>
+                  <span className="text-xl sm:text-2xl tabular-nums">Cash Out {displayMultiplier}x</span>
+                  <span className="text-green-400 text-lg sm:text-xl font-bold tabular-nums drop-shadow-sm">
+                    +{projectedCashoutPayout.toLocaleString()} coins
+                  </span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
         )}
 
         {/* Flight phase — watching (no active bet) */}
         {phase === 'flight' && !hasActiveBet && (
-          <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-center">
-            <p className="text-neutral-400 text-sm">Watching — place a bet next round</p>
+          <div className="flex gap-2 items-center">
+            <div className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-center">
+              <p className="text-neutral-400 text-sm">Watching — place a bet next round</p>
+            </div>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
           </div>
         )}
 
         {/* Crash/cooldown phase */}
         {(phase === 'crash' || phase === 'cooldown') && !hasActiveBet && (
-          <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-center">
-            <p className="text-neutral-400 text-sm">
-              {countdown !== null && countdown > 0
-                ? `Next round in ${countdown}s`
-                : 'Next round starting...'}
-            </p>
+          <div className="flex gap-2 items-center">
+            <div className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-center">
+              <p className="text-neutral-400 text-sm">
+                {countdown !== null && countdown > 0
+                  ? `Next round in ${countdown}s`
+                  : 'Next round starting...'}
+              </p>
+            </div>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
           </div>
         )}
 
@@ -658,6 +796,133 @@ export function RocketGame({ onBack }: RocketGameProps) {
           <p className="text-red-400 text-sm text-center">{apiError}</p>
         )}
       </div>
+
+        {/* Live Bets */}
+        {liveBets.length > 0 && (
+          <div className="px-3 pb-3 mt-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-neutral-400 text-xs font-semibold uppercase tracking-wide">
+                Live Bets
+              </span>
+              <span className="text-neutral-500 text-xs">({liveBets.length})</span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {liveBets.map((lb, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center justify-between px-3 py-2 rounded-lg ${
+                    lb.cashedOut
+                      ? 'bg-emerald-950/40 border border-emerald-800/40'
+                      : 'bg-[#1a1d26]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {lb.photoUrl ? (
+                      <img
+                        src={lb.photoUrl}
+                        className="w-7 h-7 rounded-full shrink-0 object-cover"
+                        alt=""
+                      />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full shrink-0 bg-neutral-700 flex items-center justify-center text-neutral-300 text-xs font-bold">
+                        {lb.username.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-white text-sm font-medium truncate">{lb.username}</p>
+                      <p className="text-neutral-400 text-xs">{lb.bet} coins</p>
+                    </div>
+                  </div>
+                  {lb.cashedOut && lb.cashoutAt !== null && lb.payout !== null && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-white text-sm font-semibold">+{lb.payout}</span>
+                      <span className="bg-green-600/60 text-green-300 text-xs font-bold px-2 py-0.5 rounded">
+                        {lb.cashoutAt.toFixed(2)}x
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Settings panel */}
+      {settingsOpen && (
+        <div className="absolute inset-0 z-50 flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setSettingsOpen(false)} />
+          <div className="relative bg-[#1a1d26] rounded-t-2xl px-5 pt-5 pb-6 flex flex-col gap-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-white font-bold text-lg">Rocket Settings</h2>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="text-neutral-400 hover:text-white w-8 h-8 flex items-center justify-center rounded-lg"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Auto Cashout */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white font-medium text-sm">Auto Cashout</p>
+                <p className="text-neutral-500 text-xs mt-0.5">Auto cashout when the multiplier is reached</p>
+              </div>
+              <button
+                onClick={() => setAutoCashoutEnabled(!autoCashoutEnabled)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  autoCashoutEnabled ? 'bg-green-500' : 'bg-red-500'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                  autoCashoutEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </div>
+
+            {autoCashoutEnabled && (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    const v = Math.max(1.1, parseFloat(autoCashoutValue) - 0.1)
+                    setAutoCashoutValue(v.toFixed(1))
+                  }}
+                  className="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-white text-lg font-bold flex items-center justify-center hover:bg-neutral-700"
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  value={autoCashoutValue}
+                  onChange={(e) => setAutoCashoutValue(e.target.value)}
+                  step="0.1"
+                  min="1.01"
+                  className="flex-1 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-center text-lg font-semibold focus:outline-none focus:border-neutral-500"
+                />
+                <button
+                  onClick={() => {
+                    const v = parseFloat(autoCashoutValue) + 0.1
+                    setAutoCashoutValue(v.toFixed(1))
+                  }}
+                  className="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-white text-lg font-bold flex items-center justify-center hover:bg-neutral-700"
+                >
+                  +
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => setSettingsOpen(false)}
+              className="w-full bg-white text-black font-bold rounded-lg py-3 text-base"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

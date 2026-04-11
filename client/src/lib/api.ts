@@ -161,10 +161,10 @@ export interface RocketCashoutResponse {
   newBalance: number
 }
 
-export function rocketPlaceBet(bet: number): Promise<RocketBetResponse> {
+export function rocketPlaceBet(bet: number, autoCashoutAt?: number | null): Promise<RocketBetResponse> {
   return apiRequest<RocketBetResponse>('/rocket/bet', {
     method: 'POST',
-    body: JSON.stringify({ bet }),
+    body: JSON.stringify({ bet, autoCashoutAt: autoCashoutAt ?? undefined }),
   })
 }
 

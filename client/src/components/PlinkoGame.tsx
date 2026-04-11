@@ -1,17 +1,12 @@
 import { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react'
-import { ArrowLeft, Settings } from 'lucide-react'
+import { Settings2 } from 'lucide-react'
 import { startPlinko, settlePlinko } from '../lib/api'
 import { useApp } from '../context/AppContext'
 import PlinkoEngine from '../lib/plinko/PlinkoEngine'
 import { binPayouts, autoBetIntervalMs, rowCountOptions } from '../lib/plinko/constants'
 import { RiskLevel, BetMode, type RowCount, type WinRecord } from '../lib/plinko/types'
 import { BinsRow } from './plinko/BinsRow'
-import { LastWins } from './plinko/LastWins'
 import { MenuPanel } from './plinko/MenuPanel'
-
-interface PlinkoGameProps {
-  onBack: () => void
-}
 
 interface BallTicketInfo {
   ticketId: string
@@ -22,7 +17,7 @@ interface BallTicketInfo {
 
 let winIdCounter = 0
 
-export function PlinkoGame({ onBack }: PlinkoGameProps) {
+export function PlinkoGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const engineRef = useRef<PlinkoEngine | null>(null)
   const { user, setBalance, config } = useApp()
@@ -37,7 +32,7 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
   const [betMode, setBetMode] = useState(BetMode.MANUAL)
   const [autoBetCount, setAutoBetCount] = useState(0)
   const [isAutoRunning, setIsAutoRunning] = useState(false)
-  const [winRecords, setWinRecords] = useState<WinRecord[]>([])
+  const [, setWinRecords] = useState<WinRecord[]>([])
   const [lastWinBinIndex, setLastWinBinIndex] = useState<number | null>(null)
   const [binsWidth, setBinsWidth] = useState(0.8)
   const [ballsInFlight, setBallsInFlight] = useState(0)
@@ -234,124 +229,116 @@ export function PlinkoGame({ onBack }: PlinkoGameProps) {
     (user ? betAmount > user.balance : false)
 
   return (
-    <div className="h-dvh bg-gray-900 flex flex-col overflow-hidden">
-      {/* Top bar */}
-      <div className="shrink-0 flex items-center justify-between px-3 py-2 bg-gray-900/80 backdrop-blur-sm border-b border-white/5">
-        <button
-          onClick={onBack}
-          className="p-2 rounded-lg text-white hover:bg-white/10 transition-colors"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <div className="text-white font-semibold text-sm">
-          ${user?.balance.toLocaleString() ?? '0'}
-        </div>
-        <button
-          onClick={() => setMenuOpen(true)}
-          className="p-2 rounded-lg text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
-          title="Auto-bet settings"
-        >
-          <Settings size={18} />
-        </button>
-      </div>
-
-      {/* Game area */}
-      <div className="flex-1 relative flex items-center justify-center min-h-0 overflow-hidden px-3 py-3">
-        {/* Canvas + bins column */}
-        <div className="flex flex-col items-center min-w-0 max-h-full">
-          <canvas
-            ref={canvasRef}
-            width={760}
-            height={570}
-            className="block max-w-full max-h-[calc(100dvh-200px)]"
-            style={{ aspectRatio: '760 / 570' }}
-          />
+    <div className="h-full w-full bg-[#0e1117] flex flex-col overflow-hidden relative min-h-0">
+      {/* Board + bins — same vertical share as Rocket chart so wide screens don’t stretch the canvas to the full viewport width (which made it taller than the screen and hid controls). */}
+      <div className="shrink-0 flex flex-col px-3 pt-3 pb-2 min-h-0" style={{ height: '55%' }}>
+        <div className="flex flex-col h-full min-h-0 items-center w-full">
+          <div className="flex-1 min-h-0 w-full flex items-center justify-center">
+            <canvas
+              ref={canvasRef}
+              width={760}
+              height={570}
+              className="block max-h-full w-auto max-w-full"
+            />
+          </div>
           {canvasWidth > 0 && (
-            <div className="mt-0.5" style={{ width: canvasWidth }}>
-              <BinsRow
-                rowCount={rowCount}
-                riskLevel={riskLevel}
-                binsWidthPercent={binsWidth}
-                lastWinBinIndex={lastWinBinIndex}
-              />
+            <div className="mt-0.5 shrink-0 w-full flex justify-center">
+              <div style={{ width: canvasWidth }}>
+                <BinsRow
+                  rowCount={rowCount}
+                  riskLevel={riskLevel}
+                  binsWidthPercent={binsWidth}
+                  lastWinBinIndex={lastWinBinIndex}
+                />
+              </div>
             </div>
           )}
         </div>
-        <div className="absolute right-3 top-3 hidden sm:block w-12">
-          <LastWins wins={winRecords} />
-        </div>
-        {apiError && (
-          <p className="absolute bottom-16 left-0 right-0 text-red-400 text-xs text-center">{apiError}</p>
-        )}
       </div>
 
-      {/* Bottom controls */}
-      <div className="shrink-0 bg-slate-800 border-t border-white/5 px-2 py-2 flex gap-1.5 items-center">
-        <select
-          value={riskLevel}
-          onChange={(e) => setRiskLevel(e.target.value as RiskLevel)}
-          disabled={controlsLocked}
-          className="shrink-0 w-16 rounded-md border border-slate-600 bg-slate-900 py-2 px-1.5 text-xs text-white focus:outline-none disabled:opacity-40 appearance-none"
-        >
-          <option value={RiskLevel.LOW}>Low</option>
-          <option value={RiskLevel.MEDIUM}>Med</option>
-          <option value={RiskLevel.HIGH}>High</option>
-        </select>
+      {/* Controls — scroll if needed (mirrors Rocket bottom section) */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
+        <div className="shrink-0 w-full border-t border-neutral-800 pt-3">
+          <div className="flex flex-col gap-3 px-3 pb-3">
+            {/* Row 1 — bet + rows + settings (Rocket-style) */}
+            <div className="flex gap-3">
+              <div className="flex-1 flex flex-col gap-1 min-w-0">
+                <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
+                  Bet Amount
+                </label>
+                <input
+                  type="number"
+                  value={betAmount}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    setBetAmount(isNaN(v) ? 0 : v)
+                  }}
+                  disabled={isAutoRunning || controlsLocked}
+                  min={minBet}
+                  max={maxBet}
+                  className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50"
+                />
+              </div>
+              <div className="flex-1 flex flex-col gap-1 min-w-0">
+                <label className="text-neutral-400 text-xs font-medium uppercase tracking-wide">
+                  Rows
+                </label>
+                <div className="flex gap-1.5">
+                  <select
+                    value={rowCount}
+                    onChange={(e) => setRowCount(Number(e.target.value) as RowCount)}
+                    disabled={controlsLocked}
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-neutral-500 disabled:opacity-50 appearance-none"
+                  >
+                    {rowCountOptions.map((rc) => (
+                      <option key={rc} value={rc}>
+                        {rc}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen(true)}
+                    className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+                  >
+                    <Settings2 size={16} strokeWidth={2} />
+                  </button>
+                </div>
+              </div>
+            </div>
 
-        <select
-          value={rowCount}
-          onChange={(e) => setRowCount(Number(e.target.value) as RowCount)}
-          disabled={controlsLocked}
-          className="shrink-0 w-14 rounded-md border border-slate-600 bg-slate-900 py-2 px-1.5 text-xs text-white focus:outline-none disabled:opacity-40 appearance-none"
-        >
-          {rowCountOptions.map((rc) => (
-            <option key={rc} value={rc}>{rc}</option>
-          ))}
-        </select>
+            {apiError && <p className="text-red-400 text-xs -mt-1">{apiError}</p>}
 
-        <div className="flex flex-1 min-w-0">
-          <div className="relative flex-1 min-w-0">
-            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs select-none">$</span>
-            <input
-              type="number"
-              value={betAmount}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value)
-                setBetAmount(isNaN(v) ? 0 : v)
-              }}
-              disabled={isAutoRunning}
-              min={minBet}
-              max={maxBet}
-              className="w-full rounded-l-md border border-slate-600 bg-slate-900 py-2 pl-6 pr-1 text-xs text-white focus:outline-none disabled:opacity-40"
-            />
+            {/* Row 2 — quick amounts */}
+            <div className="flex gap-2">
+              {[10, 50, 100, 500].map((amount) => (
+                <button
+                  key={amount}
+                  type="button"
+                  onClick={() => setBetAmount(amount)}
+                  disabled={isAutoRunning || controlsLocked}
+                  className="flex-1 bg-neutral-900 border border-neutral-700 text-white text-sm font-medium rounded-lg py-2 hover:border-neutral-600 disabled:opacity-50"
+                >
+                  {amount}
+                </button>
+              ))}
+            </div>
+
+            {/* Row 3 — primary action */}
+            <button
+              type="button"
+              onClick={isAutoRunning ? stopAuto : handleDrop}
+              disabled={!isAutoRunning && dropDisabled}
+              className={
+                isAutoRunning
+                  ? 'w-full bg-yellow-500 text-black font-bold rounded-lg py-3 text-base hover:bg-yellow-400 disabled:opacity-50'
+                  : 'w-full bg-white text-black font-bold rounded-lg py-3 text-base hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed'
+              }
+            >
+              {isAutoRunning ? 'Stop' : 'Drop'}
+            </button>
           </div>
-          <button
-            disabled={isAutoRunning}
-            onClick={() => setBetAmount(Math.max(minBet, Math.floor(betAmount / 2)))}
-            className="bg-slate-700 px-2 text-xs font-bold text-white border-y border-slate-600 hover:bg-slate-600 active:bg-slate-500 disabled:opacity-40"
-          >
-            ½
-          </button>
-          <button
-            disabled={isAutoRunning}
-            onClick={() => setBetAmount(Math.min(maxBet, betAmount * 2))}
-            className="bg-slate-700 px-2 text-xs font-bold text-white rounded-r-md border border-slate-600 border-l-0 hover:bg-slate-600 active:bg-slate-500 disabled:opacity-40"
-          >
-            2×
-          </button>
         </div>
-
-        <button
-          onClick={isAutoRunning ? stopAuto : handleDrop}
-          disabled={!isAutoRunning && dropDisabled}
-          className={`shrink-0 rounded-md px-5 py-2 font-semibold text-xs transition-colors disabled:bg-neutral-700 disabled:text-neutral-500 ${
-            isAutoRunning
-              ? 'bg-yellow-500 text-slate-900 hover:bg-yellow-400'
-              : 'bg-green-500 text-slate-900 hover:bg-green-400'
-          }`}
-        >
-          {isAutoRunning ? 'Stop' : 'Drop'}
-        </button>
       </div>
 
       <MenuPanel
