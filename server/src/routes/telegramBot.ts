@@ -69,7 +69,7 @@ router.post('/telegram/webhook', async (req: Request, res: Response): Promise<vo
   )
   const welcome =
     process.env['TELEGRAM_START_MESSAGE'] ??
-    'Welcome to MC Games — play directly in Telegram. Tap below to open the app.'
+    'Welcome to MC, play directly in Telegram. Tap below to open the app.'
   const buttonText = process.env['TELEGRAM_START_BUTTON_TEXT'] ?? 'Play'
 
   try {
